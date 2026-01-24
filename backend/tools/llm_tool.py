@@ -1,11 +1,12 @@
 import openai
-from ..config.settings import settings  # 从父级目录的 config 导入 settings
+from backend.config.settings import settings  # 从父级目录的 config 导入 settings
 
 # 初始化客户端
 # DeepSeek 兼容 OpenAI 的格式
 client = openai.OpenAI(
-    api_key=settings.DEEPSEEK_API_KEY,      # 从 settings 取密钥
-    base_url=settings.DEEPSEEK_BASE_URL    # 从 settings 取网址
+    api_key=settings.deepseek_api_key,      # 从 settings 取密钥
+    base_url=settings.deepseek_base_url
+
 )
 
 def ask_deepseek(question: str) -> str:
@@ -14,7 +15,7 @@ def ask_deepseek(question: str) -> str:
     """
     try:
         response = client.chat.completions.create(
-            model=settings.DEEPSEEK_MODEL,  # 从 settings 取模型名
+            model=settings.deepseek_model,  # 从 settings 取模型名
             messages=[
                 {"role": "system", "content": "你是一个乐于助人的 AI 助手。"},
                 {"role": "user", "content": question}
