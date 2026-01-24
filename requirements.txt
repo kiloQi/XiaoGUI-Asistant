@@ -1,0 +1,20 @@
+# 1. 核心框架
+langchain
+langchain-community
+langgraph
+
+# 2. Web 后端与接口
+fastapi
+uvicorn
+
+# 3. 前端界面
+streamlit
+
+# 4. 大模型与工具
+# 这里以 OpenAI 为例，如果你使用其他模型（如千问、智谱），请安装对应的包
+openai
+
+# 5. 数据库与文档处理
+pysqlite3
+chromadb
+python-dotenv
