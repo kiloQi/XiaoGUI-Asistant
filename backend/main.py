@@ -1,17 +1,31 @@
-# main.py
-from backend.tools.llm_tool import ask_deepseek
+from datetime import datetime
+from http.client import responses
 
-if __name__ == "__main__":
-    print("🚀 开始测试 XiaoGui Assistant...")
+from fastapi import FastAPI
+from pydantic import BaseModel
 
-    # 1. 先简单测试一下配置是否加载成功 (可选)
-    # 注意：如果 main.py 和 .env 不在同级，可能会读不到，但只要 tools 能读到就行
-    # from backend.config.settings import settings
-    # print(f"当前模型: {settings.DEEPSEEK_MODEL}")
+app=FastAPI()
 
-    # 2. 调用模型提问
-    user_question = "请用中文解释一下什么是递归？"
-    print(f"\n👤 提问: {user_question}")
+class ChatRequest(BaseModel):
+    message: str
 
-    answer = ask_deepseek(user_question)
-    print(f"\n🤖 DeepSeek 回答: {answer}")
+
+@app.get("/chat")
+async def chat(request: ChatRequest):
+    if  "时间" in request.text:
+        response= f"现在是{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    elif "计算" in request.text:
+        result=eval(request.text.replace("计算"," "))#将计算字样移除，保留其余部分作为待计算的表达式
+        response=f"结果是{result}"
+
+    else:
+        response="你好呀，我是小桂助手"
+
+    return {"response":response}
+
+
+
+
+
+
+
