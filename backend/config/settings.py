@@ -1,17 +1,13 @@
-from pathlib import Path
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import os
 
-BASE_DIR = Path(__file__).parent.parent.parent  # 这会指向 D:\XiaoGui-Assistant
+#加载.env文件
+from dotenv import load_dotenv
 
-class Settings(BaseSettings):
-    deepseek_api_key: str
-    deepseek_model: str
-    deepseek_base_url: str = "https://api.deepseek.com/v1"
+load_dotenv()
 
-    model_config = SettingsConfigDict(
-        env_file=BASE_DIR / ".env",  # <--- 强制指定 .env 的绝对路径
-        env_file_encoding="utf-8",
-        extra="ignore"
-    )
+DEEPSEEK_API_KEY=os.getenv("DEEPSEEK_API_KEY")
+DEEPSEEK_MODEL_NAME=os.getenv("DEEPSEEK_MODEL_NAME","deepseek_chat")
+DEEPSEEK_BASE_URL=os.getenv("DEEPSEEK_BASE_URL")
 
-settings = Settings()
+if not DEEPSEEK_API_KEY:
+    raise ValueError("未找到DEEPSEEK_API_KEY，请检查.env配置")
