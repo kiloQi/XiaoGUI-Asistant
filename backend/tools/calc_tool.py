@@ -1,3 +1,6 @@
+from . import mcp
+
+@mcp.tool()
 def calculate(expression:str):
     try:
         result=eval(expression)
