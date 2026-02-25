@@ -1,4 +1,4 @@
-XiaoGui-Assistant/        <-- 你的项目总文件夹（根目录）
+XiaoGui-Assistant/        <-- 项目总文件夹（根目录）
 ├── backend/              <-- 后端代码区（Python/FastAPI）
 │   ├── main.py           <-- 后端入口（整个项目的启动命令写在这里）
 │   ├── agents/           <-- 智能体核心（大脑）
@@ -7,13 +7,14 @@ XiaoGui-Assistant/        <-- 你的项目总文件夹（根目录）
 │   │   └── time_tool.py  <-- 查时间的工具
 │   │   └── calc_tool.py  <-- 计算器工具
 │   │   └── llm_tool.py   <-- 大语言模型工具
+│   │   └── file_parsing_tool.py   <-- 文档解析工具
 │   └── config/           <-- 配置文件（身份证）
 │       └── settings.py   <-- 存放 API Key 和 模型名称
 │
 ├── frontend/             <-- 前端代码区（Streamlit）
 │   └── web.py            <-- 网页界面代码（用户看到的聊天窗口）
 │
-├── venv/                 <-- 虚拟环境文件夹（不用管它，运行项目才会生成）
-├── .gitignore            <-- Git 忽略文件（非常重要，告诉 Git 不要上传哪些文件）
-├── requirements.txt      <-- 依赖清单（告诉队友：“装这些软件才能跑”）
-└── README.md             <-- 项目说明书（告诉队友：“这是什么，怎么用”）
+├── venv/                 <-- 虚拟环境文件夹
+├── .gitignore            <-- Git 忽略文件
+├── requirements.txt      <-- 依赖清单
+└── README.md             <-- 项目说明书

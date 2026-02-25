@@ -1,10 +1,13 @@
 from datetime import datetime
 import logging
 import os
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File,HTTPException
 from starlette.middleware.cors import CORSMiddleware
-
+from pathlib import Path
 from backend.tools import mcp
+from backend.tools.file_parsing_tool import parse_file
+import shutil
+
 #创建logs目录
 os.makedirs("logs", exist_ok=True)
 
@@ -54,9 +57,9 @@ def call_tool(tool_name:str,params:dict={}):
 
 
 
-@app.post("/upload")
+@app.post("/upload_and_parse")
 async def upload_file(file: UploadFile = File(...)):
-    """接受上传的文件并保存"""
+    """接受上传的文件并解析"""
     try:
         logger.info(f"收到上传文件:{file.filename}")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -70,16 +73,32 @@ async def upload_file(file: UploadFile = File(...)):
 
         logger.info(f"文件保存成功:{save_path}")
 
+        parse_result=parse_file(str(save_path))
+
+        if parse_result.get("status")=="error":
+            logger.warning(f"文件保存成功但解析失败: {parse_result.get('message')}")
+
+            return {
+                "status":"success",
+                "message":f"文件{file.filename}上传成功,但解析失败{parse_result.get('message')}：",
+                "prase_status":"failed",
+                "file_size":len(content)
+        }
+
+        logger.info(f"解析成功！共分为{parse_result.get('chunk_count')}块")
         return {
-            "status":"success",
-            "message":f"文件{file.filename}上传成功",
-            "saved_path":save_path,
-            "file_size":len(content)
+            "status": "success",
+            "message": f"文件 {file.filename} 上传并解析成功",
+            "saved_path": str(save_path),
+            "file_size": len(content),
+            "filename": safe_filename,
+            "parse_data": {
+                "full_text_preview": parse_result.get("full_text")[:500] + "...",
+                "chunk_count": parse_result.get("chunk_count"),
+                "chunks": parse_result.get("chunks")
+            }
         }
 
     except Exception as e:
-        logger.error(f"上传失败：{str(e)}")
-        return {
-            "status":"error",
-            "message":str(e)
-        }
+        logger.error(f"上传或解析过程中发生错误:{str(e)}")
+        raise HTTPException(status_code=400,detail=str(e))
