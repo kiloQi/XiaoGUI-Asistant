@@ -1,116 +1,180 @@
-import requests
 import streamlit as st
+import requests
+import json
+import os
+import time
 
-# 页面配置
-st.set_page_config(page_title="文档上传与解析", layout="wide")
-st.title("📄 文档上传和智能解析")
-
-BACKEND_URL = "http://127.0.0.1:8000/upload_and_parse"
-
-# 添加文件上传组件
-uploaded_file = st.file_uploader(
-    "请选择要上传的文件 (支持 TXT, PDF, Word, Markdown, CSV)",
-    type=["txt", "pdf", "docx", "doc", "xlsx", "xls", "csv", "md"]
+# 配置区域
+BACKEND_URL = "http://127.0.0.1:8000"
+UPLOAD_URL = f"{BACKEND_URL}/upload_and_parse"
+CHAT_URL = f"{BACKEND_URL}/chat"
+st.set_page_config(
+    page_title="小桂助手 - AI 智能体",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-if uploaded_file is not None:
+# 初始化会话状态
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "current_file_path" not in st.session_state:
+    st.session_state.current_file_path = None
+if "rag_status" not in st.session_state:
+    st.session_state.rag_status = "未加载文档"
 
-    st.info(f"✅ 已选中文件：**{uploaded_file.name}**")
-    st.write(f"📦 文件大小：{uploaded_file.size / 1024:.2f} KB")
+import uuid
+if "thread_id" not in st.session_state:
+    st.session_state.thread_id = str(uuid.uuid4())
 
-    file_type = uploaded_file.name.split('.')[-1].lower()
-    text_types = ['txt', 'csv', 'md', 'py', 'json']
+# CSS (美化界面)
+st.markdown("""
+<style>
+    .stChatMessage {padding: 10px;}
+    .status-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.85em;
+        font-weight: bold;
+        margin-bottom: 10px;
+    }
+    .status-thinking {background-color: #fff3cd; color: #856404;}
+    .status-searching {background-color: #d1ecf1; color: #0c5460;}
+    .status-tool {background-color: #d4edda; color: #155724;}
+</style>
+""", unsafe_allow_html=True)
 
+# 侧边栏：文件上传与 RAG
+with st.sidebar:
+    st.header("📂 知识库管理")
+    st.markdown("上传 PDF/TXT/Word 文档，让小桂学习后再回答。")
 
-    if file_type in text_types:
-        try:
-            content = uploaded_file.read().decode("utf-8")
-            with st.expander(" 本地快速预览 (仅文本文件)", expanded=False):
-                st.text_area(label="文件内容", value=content, height=200)
-            uploaded_file.seek(0)  # 重置指针
-        except UnicodeDecodeError:
-            st.warning("⚠️ 该文件包含特殊编码，无法直接预览，但可上传解析。")
-            uploaded_file.seek(0)
-    else:
-        st.info(f"📄 这是一个 **.{file_type}** 文件，需上传到后端解析。")
-        uploaded_file.seek(0)
+    uploaded_file = st.file_uploader(
+        "选择文件",
+        type=["txt", "pdf", "docx", "doc", "md"],
+        help="支持 txt, pdf, docx 等格式"
+    )
+
+    if uploaded_file is not None:
+        # 显示文件信息
+        st.info(f"📄 **{uploaded_file.name}**\n大小：{uploaded_file.size / 1024:.2f} KB")
+
+        if st.button(" 上传并解析到知识库", type="primary"):
+            with st.spinner("⏳ 正在上传并解析文档..."):
+                try:
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
+                    response = requests.post(UPLOAD_URL, files=files, timeout=60)
+
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get("status") == "success":
+                            st.success("✅ 文档解析成功！已存入向量库。")
+                            # 保存文件路径，以便在聊天工作流中使用
+                            st.session_state.current_file_path = result.get("saved_path")
+                            st.session_state.rag_status = f"已加载：{uploaded_file.name}"
+
+                            # 自动添加一条系统消息提示用户
+                            st.session_state.messages.append({
+                                "role": "assistant",
+                                "content": f"我已经学习了《{uploaded_file.name}》，你可以问我关于它的内容了！（共解析 {result['parse_data']['chunk_count']} 个片段）"
+                            })
+                        else:
+                            st.error(f"❌ 解析失败：{result.get('message')}")
+                    else:
+                        st.error(f"❌ 服务器错误：{response.status_code}")
+                except Exception as e:
+                    st.error(f"❌ 连接失败：{str(e)}\n请确保后端 main.py 已启动。")
 
     st.divider()
+    st.markdown(f"**当前状态**: {st.session_state.rag_status}")
+    if st.session_state.current_file_path:
+        st.code(st.session_state.current_file_path, language="text")
 
+    if st.button("🗑 清空对话历史"):
+        st.session_state.messages = []
+        st.rerun()
 
-    st.subheader(" 后端处理")
+#主界面：聊天对话框
+st.title("🤖 小桂助手")
+st.markdown("基于 LangGraph + FastAPI + Streamlit | 支持 RAG 检索与工具调用")
 
-    if st.button(" 上传并开始解析", type="primary"):
+# 显示历史消息
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# 聊天输入框
+if prompt := st.chat_input("请输入问题，或上传文件让我学习..."):
+    # 1. 显示用户消息
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # 2. 准备发送给后端的数据
+    payload = {
+        "message": prompt,
+        "file_path": st.session_state.current_file_path ,     # 如果有文件，传过去
+        "config": {
+            "configurable": {
+                "thread_id": st.session_state.thread_id
+            }
+        }
+    }
+
+    # 3. 调用后端并流式显示
+    with st.chat_message("assistant"):
+        status_placeholder = st.empty()        # 用于显示动态状态
+        response_placeholder = st.empty()      # 用于显示打字机效果
+
+        full_response = ""
+
+        # 模拟状态更新
+        if "计算" in prompt or "时间" in prompt:
+            status_placeholder.markdown('<span class="status-badge status-tool">🛠 正在调用工具...</span>',
+                                        unsafe_allow_html=True)
+        elif st.session_state.current_file_path:
+            status_placeholder.markdown('<span class="status-badge status-searching">🔍 正在检索知识库...</span>',
+                                        unsafe_allow_html=True)
+        else:
+            status_placeholder.markdown('<span class="status-badge status-thinking"> 正在思考...</span>',
+                                        unsafe_allow_html=True)
+
         try:
-            uploaded_file.seek(0)
-
-
-
-            files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
-
-            with st.spinner('⏳ 正在上传并解析中，请稍候...'):
-                response = requests.post(BACKEND_URL, files=files, timeout=60)
+            # 尝试请求流式接口 /chat
+            response = requests.post(CHAT_URL, json=payload, stream=True, timeout=30)
 
             if response.status_code == 200:
-                result = response.json()
-
-                if result.get("status") == "success":
-                    st.success("✅ 解析成功！")
-
-
-                    parse_data = result.get("parse_data", {})
-
-                    # 显示基本信息
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("文件名", result.get("filename"))
-                    with col2:
-                        st.metric("切分块数", parse_data.get("chunk_count", 0))
-                    with col3:
-                        st.metric("文件大小", f"{result.get('file_size', 0) / 1024:.1f} KB")
-
-                    st.markdown("### 📝 解析结果详情：")
-
-                    # 选项卡展示：全文预览 vs 分块详情
-                    tab1, tab2 = st.tabs([" 全文预览", " 分块详情 "])
-
-                    with tab1:
-                        full_text = parse_data.get("full_text_preview", "无预览内容")
-                        st.text_area(
-                            label="原文前 500 字预览",
-                            value=full_text,
-                            height=400,
-                            key="preview_full"
-                        )
-
-                    with tab2:
-                        chunks = parse_data.get("chunks", [])
-                        if chunks:
-                            for i, chunk in enumerate(chunks):
-                                with st.expander(f"🔹 第 {i + 1} 块 ({len(chunk)} 字符)"):
-                                    st.write(chunk)
-                        else:
-                            st.warning("未生成文本分块。")
-
-                    # 下载按钮
-                    st.download_button(
-                        label="📥 下载完整解析文本",
-                        data=parse_data.get("full_text_preview", "") + "\n...(更多内容见分块)",  # 这里简单处理，实际可拼接所有 chunks
-                        file_name=f"{uploaded_file.name.split('.')[0]}_parsed.txt",
-                        mime="text/plain"
-                    )
-
-                else:
-                    # 后端返回业务错误 (如格式不支持)
-                    st.error(f"❌ 解析失败：{result.get('message', '未知错误')}")
-
+                for line in response.iter_lines():
+                    if line:
+                        decoded_line = line.decode("utf-8")
+                        if decoded_line.startswith("data: "):
+                            data = json.loads(decoded_line[6:])
+                            token = data.get("token", "")
+                            full_response += token
+                            response_placeholder.markdown(full_response + "▌")
             else:
-                # HTTP 请求错误 (如 500, 404)
-                st.error(f"❌ 服务器响应异常：状态码 {response.status_code}")
-                st.code(response.text)
+                # 如果后端返回非 200，直接显示错误
+                full_response = f"⚠️ 后端响应异常：{response.status_code}"
+                response_placeholder.markdown(full_response)
 
         except requests.exceptions.ConnectionError:
-            st.error(" 连接失败！无法连接到后端服务。")
-            st.info(" 请检查：\n1. 后端 (main.py) 是否已启动？\n2. 端口是否为 8000？\n3. URL 是否正确？")
-        except Exception as e:
-            st.error(f"❌ 发生未知错误：{str(e)}")
+            time.sleep(1)
+            if "计算" in prompt:
+                full_response = "🛠️ [模拟] 正在调用计算器工具...\n结果是：..."
+            elif st.session_state.current_file_path:
+                full_response = "🔍 [模拟] 已在知识库中检索到相关内容...\n根据文档，《" + os.path.basename(
+                    st.session_state.current_file_path) + "》中提到..."
+            else:
+                full_response = f"小桂收到：'{prompt}'。\n(提示：请确保后端 main.py 中实现了 /chat 接口以支持真实流式对话)"
+
+            response_placeholder.markdown(full_response)
+
+        finally:
+            status_placeholder.empty()
+            # 保存最终回复
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+
+#底部说明
+st.markdown("---")
+st.caption(" 提示：上传文件后，请在对话框中输入与该文件相关的问题，系统将自动触发 RAG 检索。")

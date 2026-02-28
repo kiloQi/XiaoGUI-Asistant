@@ -6,7 +6,6 @@ XiaoGui-Assistant/        <-- 项目总文件夹（根目录）
 │   ├── tools/            <-- 工具包（手和脚）
 │   │   └── time_tool.py  <-- 查时间的工具
 │   │   └── calc_tool.py  <-- 计算器工具
-│   │   └── llm_tool.py   <-- 大语言模型工具
 │   │   └── file_parsing_tool.py   <-- 文档解析工具
 │   └── config/           <-- 配置文件（身份证）
 │       └── settings.py   <-- 存放 API Key 和 模型名称

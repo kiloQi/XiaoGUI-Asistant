@@ -1,46 +1,89 @@
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.memory import MemorySaver
 from typing import TypedDict, Annotated, List, Optional
 import operator
 from langgraph.graph import StateGraph,END
 import os
-import asyncio
-
-from streamlit import success
-
-from backend.tools.file_parsing_tool import parse_file
+from langchain_openai import ChatOpenAI
+from dotenv import load_dotenv
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader,Docx2txtLoader,TextLoader
+from langchain_core.embeddings import Embeddings
+
+load_dotenv()
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
+#初始化大模型
+llm=ChatOpenAI(
+    model=os.getenv("DEEPSEEK_MODEL_NAME","deepseek-chat"),
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    base_url=os.getenv("DEEPSEEK_BASE_URL","https://api.deepseek.com"),
+    temperature=0.8,
+    streaming=True      #开启流式输出
+)
 
 
+# 适配器类
+class FlagEmbeddingAdapter(Embeddings):
+
+    def __init__(self, model_path: str):
+        from FlagEmbedding import FlagModel
+        import numpy as np
+
+        print(f"适配器正在加载模型：{model_path} ...")
+
+        self.flag_model = FlagModel(
+            model_name_or_path=model_path,
+            query_instruction_for_retrieval="为这个句子生成表示以用于检索：",
+            use_fp16=False
+        )
+        self.np = np
+        print(f"✅ 模型加载成功！类型：{type(self.flag_model)}")
+
+    def _normalize(self, embeddings):
+        if isinstance(embeddings, list):
+            embeddings = self.np.array(embeddings)
+        norm = self.np.linalg.norm(embeddings, ord=2, axis=1, keepdims=True)
+        # 防止除以 0
+        norm = self.np.where(norm == 0, 1, norm)
+        return (embeddings / norm).tolist()
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        try:
+            raw_embeddings = self.flag_model.encode_documents(texts)
+        except AttributeError:
+            raw_embeddings = self.flag_model.encode(texts)
+
+        return self._normalize(raw_embeddings)
+
+    def embed_query(self, text: str) -> List[float]:
+        try:
+            raw_embeddings = self.flag_model.encode_queries([text])
+        except AttributeError:
+            raw_embeddings = self.flag_model.encode([text])
+
+        normalized = self._normalize(raw_embeddings)
+        return normalized[0]
 #定义RAGAgent
 class RAGAgent:
     def __init__(self):
-
-        print("正在初始化RAG引擎")
-
+        print("正在初始化 RAG 引擎")
+        os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+        local_model_path = r"D:/XiaoGui-Assistant/bge-small-zh-v1.5"
+        self.embedding_model = None
+        self.vectorstore = None
         try:
-            self.embedding_model=HuggingFaceEmbeddings(
-                model_name="BAAI/bge-small-zh-v1.5",    #支持中文的免费模型
-                model_kwargs={'device':'cpu'},
-                encode_kwargs={'normalize_embeddings':True}
+            self.embedding_model = FlagEmbeddingAdapter(local_model_path)
 
-            )
-            print("嵌入模型加载成功")
+            print("嵌入模型加载成功（通过适配器）")
 
         except Exception as e:
             print(f"⚠️ 模型加载失败 : {e}")
-            print("💡 提示：请检查网络连接，或尝试手动下载模型到本地。")
-
-            self.embedding_model=None
-
-            #初始化一个空的向量数据库
-            self.vectorstore:Optional[FAISS]=None
+            print("提示：请检查网络连接，或尝试手动下载模型到本地。")
+            self.embedding_model = None
+            self.vectorstore: Optional[FAISS] = None
 
     def parse_file(self, file_path: str) -> List[str]:
-            """
-            读取文件内容，切成一段一段的文字。
-            """
             if not os.path.exists(file_path):
                 return []
 
@@ -68,38 +111,51 @@ class RAGAgent:
                 print(f"❌ 文件解析出错: {e}")
                 return []
 
-    def add_documents(self,texts:List[str]):
-            """
-            把文字存进向量数据库
-            """
-            if not texts or self.embedding_model is None:
-                return False
+    def add_documents(self, texts: List[str]):
+        if not texts or self.embedding_model is None:
+            return False
 
-            try:
-                if self.vectorstore is None:
-                    self.vectorstore=FAISS.from_texts(texts,self.embedding_model)
+        try:
+            print(f"⚡ 正在计算 {len(texts)} 条文本的向量...")
+            all_vectors = self.embedding_model.embed_documents(texts)
+            print(f"✅ 向量计算完成：{len(all_vectors)} x {len(all_vectors[0])}")
 
-                else:
-                    self.vectorstore.add_texts(texts)   #追加进去
-                    print("已成功存进知识库")
-                    return True
-            except Exception as e:
-                print(f"知识库存入失败：{e}")
-                return False
+            metadatas = [{} for _ in texts]
 
-    def search(self,query:str):
-            """
-            根据问题查找最相关的资料
-            """
-            if self.embedding_model is None or self.vectorstore   is None:
-                return []
-            try:
-                docs=self.vectorstore.simlarity_search(query,k=3)
-                return [doc.page_content for doc in docs]
-            except Exception as e:
-                print("检索失败：{e}")
-                return []
+            if self.vectorstore is None:
+                text_embedding_pairs = list(zip(texts, all_vectors))
+                self.vectorstore = FAISS.from_embeddings(
+                    text_embeddings=text_embedding_pairs,
+                    embedding=self.embedding_model,
+                    metadatas=metadatas
+                )
+                print("首次创建向量数据库成功！")
+            else:
+                text_embedding_pairs = list(zip(texts, all_vectors))
+                self.vectorstore.add_embeddings(
+                    text_embeddings=text_embedding_pairs,
+                    metadatas=metadatas
+                )
+                print("➕ 追加数据到向量数据库成功！")
 
+            print("✅ 已成功存进知识库")
+            return True
+
+        except Exception as e:
+            print(f"❌ 知识库存入失败：{e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def search(self, query: str):
+        if self.embedding_model is None or self.vectorstore is None:
+            return []
+        try:
+            docs = self.vectorstore.similarity_search(query, k=3)
+            return [doc.page_content for doc in docs]
+        except Exception as e:
+            print(f"❌ 检索失败：{e}")
+            return []
 
 rag_agent=RAGAgent()
 
@@ -121,132 +177,121 @@ def file_upload_node(state: AgentState):
 
 
     print(f"\n📂正在处理文件: {file_path} ...")
+    try:
+        #解析文字
+        texts=rag_agent.parse_file(file_path)
 
-    #解析文字
-    texts=rag_agent.parse_file(file_path)
+        if not texts:
+            return {"messages":["❌ 文件解析失败，可能是格式不支持或文件为空。"],"context":""}
 
-    if not texts:
-        return {"messages":["❌ 文件解析失败，可能是格式不支持或文件为空。"],"context":""}
+        #存入知识库
+        success=rag_agent.add_documents(texts)
 
-    #存入知识库
-    success=rag_agent.add_documents(texts)
+        if success:
+            filename=os.path.basename(file_path)
+            return {"messages": [f"✅ 文件《{filename}》已学习完毕！你可以问我关于它的内容了。"]}
+        else:
+            return {"messages": ["❌ 知识库存储失败。"]}
 
-    if success:
-        filename=os.path.basename(file_path)
-        return {"messages": [f"✅ 文件《{filename}》已学习完毕！你可以问我关于它的内容了。"]}
-    else:
-        return {"messages": ["❌ 知识库存储失败。"]}
+    except Exception as e:
+        return {
+            "messages":[f"❌ 发生错误：{str(e)}"],
+            "context":"",
+            "upload_status":"error"
+        }
 
-#定义检索节点
+
+# 定义检索节点
 def rag_retrieval_node(state: AgentState):
+    user_msg = state["messages"][-1]
 
-    user_msg=state["messages"][-1]
-    # 如果用户是在说“上传文件”，那就不需要检索，直接跳过
-    if "上传" in user_msg or "学习" in user_msg:
+    #闲聊关键词列表
+    chit_chat_keywords = [
+        "你是谁", "你好", "hello", "hi", "谢谢", "感谢", "再见",
+        "拜拜", "叫什么", "身份", "测试", "在吗", "吃了吗",
+        "天气", "名字", "介绍下自己", "你能做什么"
+    ]
+
+    # 检查用户消息是否包含闲聊关键词
+    if any(keyword in user_msg for keyword in chit_chat_keywords) or len(user_msg) < 4:
+        print(f"检测到闲聊或短消息：'{user_msg}'，跳过检索。")
         return {"context": ""}
 
-    print(f"\n  正在思考：'{user_msg}'，去知识库找找线索...")
+    # 原来的上传指令判断
+    if (user_msg.startswith("上传") or user_msg.startswith("学习")) and len(user_msg) < 10:
+        print("检测到上传指令，跳过检索。")
+        return {"context": ""}
+
+    # --- 下面是正常地检索逻辑 ---
+    print(f"\n正在思考：'{user_msg}'，去知识库找找线索...")
 
     relevant_docs = rag_agent.search(user_msg)
     # 把找到的几段话拼成一个大字符串
-    context_str = "\n\n--- 参考资料 ---\n".join(relevant_docs)
+    context_str = "\n---\n".join(relevant_docs)
+
     if relevant_docs:
-        print(f"找到了 {len(relevant_docs)} 条线索！")
+        print(f"✅ 找到了 {len(relevant_docs)} 条线索！")
         return {"context": context_str}
-
     else:
-        print(" 知识库里没有相关线索。")
+        print("⚠️ 知识库里没有相关线索。")
         return {"context": ""}
-
 #定义聊天节点
 def chat_node(state: AgentState):
-    """模拟聊天节点，这里需要调用llm"""
+    """调用DeepSeek模型进行回复"""
     user_msg=state["messages"][-1]   #取最后一条消息（用户刚说的）
+    context=state.get("context","")
 
-    if "我叫什么" in user_msg or "名字" in user_msg:
-        for msg in reversed(state["messages"][:-1]):  # 倒序查找历史
-            if "我是" in msg:
-                name = msg.split("我是")[1].strip()
-                return {"messages": [f"你叫 {name} 呀！"]}
+    if context:
+        system_prompt=f"""你是一个智能对话助手“小桂”。
+请根据以下【参考资料】回答用户问题。如果参考资料没有答案，请用你自己的知识回答，但要说明资料没提到
 
-    ai_response=f"小桂收到：{user_msg}"
+【参考资料】：{context}
+"""
+    else:
+        system_prompt="""你是一个智能助手小桂，请用友好的中文回答用户问题"""
 
-    return {"messages":[ai_response]}
+    try:
+        messages=[
+            ("system",system_prompt),
+            ("human",user_msg)
+        ]
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        response=llm.invoke(messages)
+        ai_content=response.content
+        print(f" 小桂回复: {ai_content[:50]}...")
+        return {"messages":[ai_content]}
+    except Exception as e:
+        error_msg=f"大模型调用失败：str{e}"
+        print(error_msg)
+        return {"messages":[error_msg]}
 
 
-#创建工作流
+
 async def build_workflow():
-    workflow=StateGraph(AgentState)
-    workflow.add_node("chat",chat_node)
-    workflow.set_entry_point("chat")
-    workflow.add_edge("chat",END)
+    # 1. 创建图表，定义状态结构
+    workflow = StateGraph(AgentState)
 
+    # 2. 添加三个节点
+    workflow.add_node("uploader", file_upload_node)
+    workflow.add_node("retriever", rag_retrieval_node)
+    workflow.add_node("chat", chat_node)
 
-    memory=AsyncSqliteSaver.from_conn_string("sqlite:///memory.db")
-    workflow.add_edge("chat",memory)
-    app=workflow.compile(checkpointer=memory)
+    # 3. 设定工作流程顺序
+    # 入口：看看有没有文件要处理
+    workflow.set_entry_point("uploader")
+    # 处理完文件后， 去检索资料
+    workflow.add_edge("uploader", "retriever")
+    # 检索完资料后，生成回答
+    workflow.add_edge("retriever", "chat")
+    # 回答完后，结束流程
+    workflow.add_edge("chat", END)
+
+    # 4. 配置“记忆”
+    # 使用 SQLite 保存聊天历史
+    #memory = SqliteSaver.from_conn_string("sqlite:///memory.db")
+    memory=MemorySaver()
+    # 5. 编译并返回应用
+    app = workflow.compile(checkpointer=memory)
     return app
-
-
-if __name__ == "__main__":
-    async def main():
-        print("=" * 50)
-        print("🧠 小桂助手 - 记忆功能测试")
-        print("=" * 50)
-
-        # 创建工作流
-        app = build_workflow()
-
-        # 配置：thread_id 区分不同用户
-        config = {"configurable": {"thread_id": "user_001"}}
-
-        # 🗣️ 第一轮对话
-        print("\n【第1轮】用户：你好，我是小明")
-        result1 = app.invoke(
-            {"messages": ["你好，我是小明"]},
-            config=config
-        )
-        print(f"【第1轮】小桂：{result1['messages'][-1]}")
-
-        # 🗣️ 第二轮对话
-        print("\n【第2轮】用户：今天天气怎么样？")
-        result2 = app.invoke(
-            {"messages": ["今天天气怎么样？"]},
-            config=config
-        )
-        print(f"【第2轮】小桂：{result2['messages'][-1]}")
-
-        # 🗣️ 第三轮对话 - 测试记忆
-        print("\n【第3轮】用户：我叫什么名字？")
-        result3 = app.invoke(
-            {"messages": ["我叫什么名字？"]},
-            config=config
-        )
-        print(f"【第3轮】小桂：{result3['messages'][-1]}")
-
-        print("\n" + "=" * 50)
-        print("✅ 记忆功能测试完成！")
-        print("=" * 50)
-
-
-
-
-
 
 

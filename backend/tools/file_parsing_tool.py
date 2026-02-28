@@ -39,7 +39,6 @@ def parse_file(file_path:str):
         )
         chunks=text_splitter.split_documents(documents)
 
-        #   这个列表将来就是要存入数据库，让大模型去检索的“知识碎片”。
         chunk_texts=[chunk.page_content for chunk in chunks]
 
         return {"status":"success",
