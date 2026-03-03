@@ -20,7 +20,7 @@ from langchain_core.messages import BaseMessage,AIMessage,ToolMessage,HumanMessa
 try:
     from backend.tools.file_parsing_tool import parse_file
     from backend.tools.calc_tool import calculate
-    from backend.tools.image_recognition import recognize_image
+    from backend.tools.image_recognition_tool import recognize_image
     from backend.tools.time_tool import get_current_time
     from backend.tools.weather_tool import get_weather
     from backend.tools.web_search_tool import web_search

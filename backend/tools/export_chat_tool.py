@@ -2,10 +2,10 @@
 
 import os
 import datetime
-from . import mcp
+from .. import mcp
 
 #定义导出文件夹的路径
-EXPORT_DIR="backend/exports"
+EXPORT_DIR=r"D:\XiaoGui-Assistant\backend\exports"
 
 #检查文件夹是否存在，不存在就创建一个
 if not os.path.exists(EXPORT_DIR):

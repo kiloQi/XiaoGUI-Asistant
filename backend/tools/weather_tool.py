@@ -2,7 +2,7 @@ import os
 import requests
 from typing import Dict,Any
 
-from . import mcp
+from .. import mcp
 @mcp.tool()
 def get_weather(city_name:str) -> Dict[str,Any]:
     """
