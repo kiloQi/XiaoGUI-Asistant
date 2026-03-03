@@ -3,7 +3,7 @@ XiaoGui-Assistant/        <-- 项目总文件夹（根目录）
 │   ├── main.py           <-- 后端入口（整个项目的启动命令写在这里）
 │   ├── agents/           <-- 智能体核心（大脑）
 │   │   └── workflow.py   <-- LangGraph 工作流逻辑
-│   ├── tools/            <-- 工具包（手和脚）
+│   ├── tools/            <-- 工具包
 │   │   └── time_tool.py  <-- 查时间的工具
 │   │   └── calc_tool.py  <-- 计算器工具
 │   │   └── image_recognition_tool.py  <-- 图片识别工具
@@ -11,11 +11,11 @@ XiaoGui-Assistant/        <-- 项目总文件夹（根目录）
 │   │   └── web_search_tool.py  <-- 联网搜索工具
 │   │   └── export_chat_tool.py  <-- 导出聊天记录工具
 │   │   └── file_parsing_tool.py   <-- 文档解析工具
-│   └── config/           <-- 配置文件（身份证）
+│   └── config/           <-- 配置文件
 │       └── settings.py   <-- 存放 API Key 和 模型名称
 │
 ├── frontend/             <-- 前端代码区（Streamlit）
-│   └── web.py            <-- 网页界面代码（用户看到的聊天窗口）
+│   └── web.py            <-- 网页界面代码（聊天窗口）
 │
 ├── venv/                 <-- 虚拟环境文件夹
 ├── .gitignore            <-- Git 忽略文件
