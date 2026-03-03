@@ -1,6 +1,10 @@
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.checkpoint.memory import MemorySaver
+
+# TypedDict: 用来定义一个“记事本”的格式
+# Annotated: “自动追加消息”
+# Sequence: 表示这是一个列表
 from typing import TypedDict, Annotated, List, Optional
+
 import operator
 from langgraph.graph import StateGraph,END
 import os
@@ -8,10 +12,33 @@ from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import PyPDFLoader,Docx2txtLoader,TextLoader
-from langchain_core.embeddings import Embeddings
+
+# BaseMessage: 所有消息的基类,ToolMessage: 工具运行完后返回的结果
+from langchain_core.messages import BaseMessage,AIMessage,ToolMessage,HumanMessage
+
+#导入工具
+try:
+    from backend.tools.file_parsing_tool import parse_file
+    from backend.tools.calc_tool import calculate
+    from backend.tools.image_recognition import recognize_image
+    from backend.tools.time_tool import get_current_time
+    from backend.tools.weather_tool import get_weather
+    from backend.tools.web_search_tool import web_search
+    tool_list = [parse_file,
+                 calculate,
+                 recognize_image,
+                 web_search,
+                 get_weather,
+                 get_current_time]
+
+
+
+
+except Exception as e:
+    print(f"警告：工具导入失败，请检查路径。错误信息：{e}")
+    tools_list = []  # 如果导入失败，先给个空列表，防止程序崩溃
 
 load_dotenv()
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 #初始化大模型
 llm=ChatOpenAI(
@@ -21,49 +48,100 @@ llm=ChatOpenAI(
     temperature=0.8,
     streaming=True      #开启流式输出
 )
+#绑定工具
+llm_with_tools=llm.bind_tools(tools_list)
 
 
-# 适配器类
-class FlagEmbeddingAdapter(Embeddings):
+#定义智能体状态
+class AgentState(TypedDict):
+    messages:Annotated[List[BaseMessage],operator.add]   #Annotated[..., add_messages] ：当有新消息进来时，自动把它添加到列表末尾，不覆盖旧消息
 
-    def __init__(self, model_path: str):
-        from FlagEmbedding import FlagModel
-        import numpy as np
 
-        print(f"适配器正在加载模型：{model_path} ...")
+#定义思考节点
+def chat_think_node(state: AgentState):
+    """
+    智能体的大脑
+    输入：当前的状态（包含所有历史对话）。
+    输出：AI 思考后的结果。
 
-        self.flag_model = FlagModel(
-            model_name_or_path=model_path,
-            query_instruction_for_retrieval="为这个句子生成表示以用于检索：",
-            use_fp16=False
-        )
-        self.np = np
-        print(f"✅ 模型加载成功！类型：{type(self.flag_model)}")
+    """
+    messages=state["messages"]  #拿出全部对话历史
+    response=llm_with_tools.invoke(messages)
 
-    def _normalize(self, embeddings):
-        if isinstance(embeddings, list):
-            embeddings = self.np.array(embeddings)
-        norm = self.np.linalg.norm(embeddings, ord=2, axis=1, keepdims=True)
-        # 防止除以 0
-        norm = self.np.where(norm == 0, 1, norm)
-        return (embeddings / norm).tolist()
+    # LangGraph 会自动把这条新消息追加到 state["messages"] 里
+    return {"messages":response}
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        try:
-            raw_embeddings = self.flag_model.encode_documents(texts)
-        except AttributeError:
-            raw_embeddings = self.flag_model.encode(texts)
+#定义工具执行节点
+def tools_node(state: AgentState):
+    """
+    检查上一步 AI 是不是想调用工具。如果是，它就真的去跑代码，然后把结果记下来。
+    """
+    messages=state["messages"]
+    last_msg=messages[-1]
+    results=[]  # 用来存工具运行的结果
+    #检查 AI 是否发起了工具调用
+    if hasattr(last_msg,"tool_calls") and last_msg.tool_calls:
 
-        return self._normalize(raw_embeddings)
+# 遍历每一个工具调用请求（有时候 AI 会一次性调用多个工具）
+        for tool_call in last_msg.tool_calls:
+            tool_name=tool_call["name"]
+            tool_args=tool_call["args"]
+            tool_call_id=tool_call["id"]
 
-    def embed_query(self, text: str) -> List[float]:
-        try:
-            raw_embeddings = self.flag_model.encode_queries([text])
-        except AttributeError:
-            raw_embeddings = self.flag_model.encode([text])
+            # 在工具列表里找对应的函数,名字 -> 函数对象
+            tool_map={tool_name:tool for tool in tools_list}
+            selected_tool=tool_map[tool_name]
 
-        normalized = self._normalize(raw_embeddings)
-        return normalized[0]
+            if selected_tool:
+                try:
+                    observation=selected_tool.invoke(tool_args)
+                    results.append(ToolMessage(
+                        content=str(observation),
+                        name=tool_name,
+                        tool_id=tool_call_id
+                    ))
+
+
+                except Exception as e:
+                    error_msg = f"工具 '{tool_name}' 执行出错：{str(e)}"
+                    results.append(ToolMessage(
+                        content=error_msg,
+                        name=tool_name,
+                        tool_call_id=tool_call_id
+                    ))
+
+            else:
+                # AI 想调用的工具找不到
+                results.append(ToolMessage(
+                    content=f"错误：找不到名为 '{tool_name}' 的工具",
+                    name=tool_name,
+                    tool_call_id=tool_call_id
+                ))
+    # 返回所有工具的运行结果,把这些结果追加到 state["messages"] 里
+    return {"messsages":results}
+
+#定义执行逻辑
+def should_continue(state: AgentState):
+    """
+    - 如果 AI 说“我要调用工具”，就指挥去“tools_node”干活。
+    - 如果 AI 说“我没别的事了，直接回答吧”，就指挥“结束 (END)”。
+    """
+    messages=state["messages"]
+    last_msg=messages[-1]
+    # 判断最后一条消息里有没有工具调用请求
+    if hasattr(last_msg,"tool_calls") and last_msg.tool_calls:
+        # 有请求 -> 去工具节点
+        return "tools"
+        # 没请求 -> 任务完成，结束
+    else:
+        return "END"
+
+
+
+
+
+
+
 #定义RAGAgent
 class RAGAgent:
     def __init__(self):
@@ -73,9 +151,9 @@ class RAGAgent:
         self.embedding_model = None
         self.vectorstore = None
         try:
-            self.embedding_model = FlagEmbeddingAdapter(local_model_path)
+            # self.embedding_model = FlagEmbeddingAdapter(local_model_path)
 
-            print("嵌入模型加载成功（通过适配器）")
+            print("嵌入模型加载成功")
 
         except Exception as e:
             print(f"⚠️ 模型加载失败 : {e}")
@@ -161,7 +239,7 @@ rag_agent=RAGAgent()
 
 
 #定义工作流状态
-class AgentState(TypedDict):#typedstate是定义数据结构
+class AgentState(TypedDict):                      #typedstate是定义数据结构
     messages:Annotated[List[str],operator.add]    #聊天消息记录：自动把新消息加到后面
     context:str                                   #检索到的参考资料
     uploaded_file:Optional[str]                   #用户上传的文件路径
@@ -201,40 +279,6 @@ def file_upload_node(state: AgentState):
         }
 
 
-# 定义检索节点
-def rag_retrieval_node(state: AgentState):
-    user_msg = state["messages"][-1]
-
-    #闲聊关键词列表
-    chit_chat_keywords = [
-        "你是谁", "你好", "hello", "hi", "谢谢", "感谢", "再见",
-        "拜拜", "叫什么", "身份", "测试", "在吗", "吃了吗",
-        "天气", "名字", "介绍下自己", "你能做什么"
-    ]
-
-    # 检查用户消息是否包含闲聊关键词
-    if any(keyword in user_msg for keyword in chit_chat_keywords) or len(user_msg) < 4:
-        print(f"检测到闲聊或短消息：'{user_msg}'，跳过检索。")
-        return {"context": ""}
-
-    # 原来的上传指令判断
-    if (user_msg.startswith("上传") or user_msg.startswith("学习")) and len(user_msg) < 10:
-        print("检测到上传指令，跳过检索。")
-        return {"context": ""}
-
-    # --- 下面是正常地检索逻辑 ---
-    print(f"\n正在思考：'{user_msg}'，去知识库找找线索...")
-
-    relevant_docs = rag_agent.search(user_msg)
-    # 把找到的几段话拼成一个大字符串
-    context_str = "\n---\n".join(relevant_docs)
-
-    if relevant_docs:
-        print(f"✅ 找到了 {len(relevant_docs)} 条线索！")
-        return {"context": context_str}
-    else:
-        print("⚠️ 知识库里没有相关线索。")
-        return {"context": ""}
 #定义聊天节点
 def chat_node(state: AgentState):
     """调用DeepSeek模型进行回复"""
@@ -273,8 +317,8 @@ async def build_workflow():
 
     # 2. 添加三个节点
     workflow.add_node("uploader", file_upload_node)
-    workflow.add_node("retriever", rag_retrieval_node)
-    workflow.add_node("chat", chat_node)
+    workflow.add_node("agent",chat_think_node )
+    workflow.add_node("tools", tools_node)
 
     # 3. 设定工作流程顺序
     # 入口：看看有没有文件要处理
@@ -288,8 +332,8 @@ async def build_workflow():
 
     # 4. 配置“记忆”
     # 使用 SQLite 保存聊天历史
-    #memory = SqliteSaver.from_conn_string("sqlite:///memory.db")
-    memory=MemorySaver()
+    memory = SqliteSaver.from_conn_string("sqlite:///memory.db")
+    # memory=MemorySaver()
     # 5. 编译并返回应用
     app = workflow.compile(checkpointer=memory)
     return app
