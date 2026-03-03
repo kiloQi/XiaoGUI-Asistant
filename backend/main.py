@@ -5,10 +5,22 @@ import os
 from fastapi import FastAPI, UploadFile, File,HTTPException
 from starlette.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from backend.tools import mcp
+from fastmcp import FastMCP
 import json
 from backend.agents.workflow import build_workflow
 from contextlib import asynccontextmanager
+
+mcp = FastMCP("XiaoGui-Assistant")
+
+# 在这里统一导入工具，确保主程序启动时自动加载
+from backend.tools import (web_search_tool,
+                    calc_tool,
+                    weather_tool,
+                    time_tool,
+                    image_recognition_tool,
+                    export_chat_tool,
+                    file_parsing_tool)
+
 
 #全局变量定义
 workflow_app=None

@@ -16,6 +16,7 @@ from langchain_community.document_loaders import PyPDFLoader,Docx2txtLoader,Text
 # BaseMessage: 所有消息的基类,ToolMessage: 工具运行完后返回的结果
 from langchain_core.messages import BaseMessage,AIMessage,ToolMessage,HumanMessage
 
+
 #导入工具
 try:
     from backend.tools.file_parsing_tool import parse_file
@@ -24,12 +25,14 @@ try:
     from backend.tools.time_tool import get_current_time
     from backend.tools.weather_tool import get_weather
     from backend.tools.web_search_tool import web_search
+    from backend.tools.export_chat_tool import save_messages_to_markdown
     tool_list = [parse_file,
                  calculate,
                  recognize_image,
                  web_search,
                  get_weather,
-                 get_current_time]
+                 get_current_time,
+                 save_messages_to_markdown]
 
 
 

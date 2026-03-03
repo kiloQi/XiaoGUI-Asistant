@@ -2,7 +2,7 @@
 
 import os
 import datetime
-from .. import mcp
+from backend.main import mcp
 
 #定义导出文件夹的路径
 EXPORT_DIR=r"D:\XiaoGui-Assistant\backend\exports"
