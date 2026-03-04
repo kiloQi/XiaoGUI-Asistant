@@ -2,14 +2,12 @@
 import os
 import sys
 import time
-from typing import TypedDict, Dict, Optional, Any, List
+from typing import TypedDict, Dict, Any, List
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backend.config.settings import (
     DEEPSEEK_API_KEY,
     DEEPSEEK_MODEL_NAME,
-    DEEPSEEK_BASE_URL,
-    AMAP_WEATHER_KEY,
-    TAVILY_API_KEY
+    DEEPSEEK_BASE_URL
 )
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import (
@@ -18,10 +16,9 @@ from langchain_core.prompts import (
     SystemMessagePromptTemplate,
     HumanMessagePromptTemplate
 )
-from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_core.tools import Tool, tool
-from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
-from langchain_core.runnables import RunnablePassthrough, RunnableSequence
+from langchain_core.tools import tool
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END
 from backend.tools.calc_tool import ExpressionCalculator
@@ -196,7 +193,7 @@ def agent_node(state: AgentState) -> AgentState:
             state["agent_response"] = response.content if hasattr(response, 'content') else ""
             state["chat_history"].append(AIMessage(content=state["agent_response"]))
 
-        print(f"🔍 Agent分析完成 - 需要工具：{state['need_tool']}")
+        print(f"Agent分析完成 - 需要工具：{state['need_tool']}")
 
     except Exception as e:
         state["agent_response"] = f"Agent节点出错：{str(e)}"
@@ -234,7 +231,7 @@ def tool_node(state: AgentState) -> AgentState:
             result = tool_map[tool_name].invoke(tool_args)
             state["tool_results"][tool_name] = str(result)
 
-            tip = f"🔧 {tool_name} 工具调用成功！\n"
+            tip = f"{tool_name} 工具调用成功！\n"
             for c in tip:
                 print(c, end="", flush=True)
                 time.sleep(Config.STREAM_DELAY)
