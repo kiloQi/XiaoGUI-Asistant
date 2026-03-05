@@ -3,7 +3,7 @@ from typing import Dict, Any
 
 from tavily import TavilyClient
 
-from . import mcp
+from backend.main import mcp
 
 _WEB_SEARCH_TOOL_REGISTERED = False
 

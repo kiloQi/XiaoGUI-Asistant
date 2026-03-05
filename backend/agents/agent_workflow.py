@@ -1,5 +1,10 @@
 #经过ai润色的版本，去掉了大量重复代码
 import os
+
+#从.env文件读取信息
+from dotenv import load_dotenv
+load_dotenv()
+
 import sys
 import time
 from typing import TypedDict, Dict, Any, List
@@ -23,7 +28,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END
 from backend.tools.calc_tool import ExpressionCalculator
 from backend.tools.file_parsing_tool import FileParser
-from backend.tools.image_recognition import DeepSeekImageRecognizer
+from backend.tools.image_recognition_tool import DeepSeekImageRecognizer
 from backend.tools.time_tool import CurrentTimeTool
 from backend.tools.weather_tool import WeatherQueryTool
 from backend.tools.web_search_tool import TavilyWebSearcher
@@ -153,10 +158,11 @@ def agent_node(state: AgentState) -> AgentState:
     """Agent节点：生成回答/手动解析工具调用指令"""
     state["current_node"] = "agent_node"
 
+
     llm = ChatOpenAI(
         model=DEEPSEEK_MODEL_NAME,
-        openai_api_key=DEEPSEEK_API_KEY,
-        openai_api_base=DEEPSEEK_BASE_URL,
+        api_key=os.getenv("DEEPSEEK_API_KEY"),
+        base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
         temperature=0.7,
         streaming=True,
         tags=["no-tracing"],
@@ -264,8 +270,8 @@ def response_node(state: AgentState) -> AgentState:
 
         llm = ChatOpenAI(
             model=DEEPSEEK_MODEL_NAME,
-            openai_api_key=DEEPSEEK_API_KEY,
-            openai_api_base=DEEPSEEK_BASE_URL,
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
             temperature=0.7,
             streaming=True
         )

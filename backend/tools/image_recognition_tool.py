@@ -4,7 +4,7 @@ from typing import Dict, Any
 
 import requests
 
-from . import mcp
+from backend.main import mcp
 
 _IMAGE_RECOGNIZE_TOOL_REGISTERED = False
 
