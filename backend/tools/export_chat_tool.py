@@ -2,7 +2,7 @@
 
 import os
 import datetime
-from backend.main import mcp
+
 
 #定义导出文件夹的路径
 EXPORT_DIR=r"D:\XiaoGui-Assistant\backend\exports"
@@ -11,7 +11,7 @@ EXPORT_DIR=r"D:\XiaoGui-Assistant\backend\exports"
 if not os.path.exists(EXPORT_DIR):
     os.makedirs(EXPORT_DIR)
 
-@mcp.tool()
+
 def save_messages_to_markdown(messages,file_name:str="chat_log")->str:
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 

@@ -1,109 +1,118 @@
-import base64
 import os
-from typing import Dict, Any
+import base64
+import logging
+from typing import Optional
+from openai import OpenAI
+from dotenv import load_dotenv
 
-import requests
+# 加载 .env 环境变量
+load_dotenv()
 
-from backend.main import mcp
+# 配置日志
+logger = logging.getLogger(__name__)
 
-_IMAGE_RECOGNIZE_TOOL_REGISTERED = False
 
-class DeepSeekImageRecognizer:
+def analyze_image(image_path: str) -> Optional[str]:
     """
-    使用DeepSeek-VL模型进行图片识别的类
+    使用豆包视觉模型分析本地图片
+    返回：成功时返回描述文本；失败时返回以'错误：'开头的字符串
     """
+    # 1. 从环境变量获取配置
+    api_key = os.getenv("DOUBAO_API_KEY")
+    base_url = os.getenv("DOUBAO_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
+    model_name = os.getenv("DOUBAO_MODEL_NAME")
 
-    def recognize_image(self, image_path: str, question: str = "请描述这张图片的内容") -> Dict[str, Any]:
-        """
-        使用DeepSeek-VL模型进行图片识别
-        """
-        # 1.读取图片并转base64
-        try:
-            with open(image_path, "rb") as f:
-                image_data = base64.b64encode(f.read()).decode("utf-8")
+    # 基础校验
+    if not api_key or not model_name:
+        logger.error("❌ 错误：未找到 DOUBAO_API_KEY 或 DOUBAO_MODEL_NAME")
+        return "错误：服务器配置缺失 (缺少 API Key 或模型名称)"
 
-                # 判断图片后缀，DeepSeek支持jpeg,png等
-                # 默认当作是jpeg，如果是png可以改成mime类型
-                mime_type = "image/jpeg"
-                if image_path.lower().endswith(".png"):
-                    mime_type = "image/png"
+    logger.info(f" 正在调用豆包视觉模型：{model_name}")
+    logger.info(f" 准备分析图片：{image_path}")
 
-        except FileNotFoundError:
-            return {"success": False, "error": "找不到图片文件，请检查路径"}
+    # 2. 初始化客户端
+    client = OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=30.0  # 增加超时设置，防止网络卡死
+    )
 
-        # 2.构造请求头
-        headers = {
-            "Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}",
-            "Content-Type": f"application/json",
+    # 3. 处理本地图片：转换为 Base64
+    try:
+        ext = os.path.splitext(image_path)[1].lower()
+
+        # 映射扩展名到 MIME 类型
+        mime_map = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp',
+            '.bmp': 'image/bmp'
         }
 
-        # 3.构造请求体
-        payload = {
-            "model": "deepseek-vl",
-            "messages": [
+        mime_type = mime_map.get(ext, 'image/jpeg')  # 默认当作 jpeg
+
+        with open(image_path, "rb") as image_file:
+            base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+
+        # 构造 Data URI
+        image_data_url = f"data:{mime_type};base64,{base64_image}"
+        logger.debug(f"图片 MIME 类型识别为：{mime_type}")
+
+    except FileNotFoundError:
+        logger.error(f"❌ 文件未找到：{image_path}")
+        return "错误：找不到指定的图片文件"
+    except Exception as e:
+        logger.error(f"❌ 图片读取失败：{str(e)}")
+        return f"错误：图片读取失败 - {str(e)}"
+
+    # 4. 调用 API
+    try:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
                 {
                     "role": "user",
                     "content": [
-                        # 图片部分
                         {
                             "type": "image_url",
                             "image_url": {
-                                "type": f"data:{mime_type};base64,{image_data}",
-                            }
+                                "url": image_data_url
+                            },
                         },
-
-                        # 文字问题部分
                         {
                             "type": "text",
-                            "text": question
-                        }
-                    ]
+                            "text": "请详细描述这张图片的内容。如果图片中包含文字，请一并提取。"
+                        },
+                    ],
                 }
             ],
-            "max_tokens": 1024
-        }
+            max_tokens=1024,
+        )
 
-        # 4.发送请求(DeepSeek 的接口地址)
-        url = "https://api.deepseek.com/v1/chat/completions"
+        # 5. 返回结果
+        if response.choices and len(response.choices) > 0:
+            result = response.choices[0].message.content
+            logger.info("✅ 图片分析成功")
+            return result
+        else:
+            logger.warning("⚠️ API 返回为空")
+            return "错误：API 返回内容为空"
 
-        try:
-            response = requests.post(url, headers=headers, json=payload)
-            if response.status_code == 200:
-                result = response.json()
-                # 提取回答内容
-                answer = result["choices"][0]["message"]["content"]
-                return {"success": True, "answer": answer}
-            else:
-                error_msg = response.text
-                return {"success": False, "error": error_msg}
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"❌ API 调用失败：{error_msg}")
 
-        except Exception as e:
-            return {"success": False, "error": f"程序异常{str(e)}"}
+        # 统一返回格式，确保主程序能识别为失败
+        if "SSLEOFError" in error_msg or "EOF" in error_msg or "Connection" in error_msg:
+            return "错误：网络连接失败 (可能是模型名称错误或网络不通)"
+        elif "401" in error_msg or "Unauthorized" in error_msg:
+            return "错误：API Key 无效或权限不足"
+        elif "404" in error_msg:
+            return "错误：模型不存在 (请检查 .env 中的模型名称)"
+        elif "Rate limit" in error_msg or "429" in error_msg:
+            return "错误：请求过于频繁，请稍后再试"
+        else:
+            return f"错误：API 调用异常 - {error_msg}"
 
-
-image_recognizer_instance = DeepSeekImageRecognizer()
-
-image_recognizer_instance.recognize_image = mcp.tool(
-    name="image_recognize",  # 和LangChain中工具名完全一致
-    description="图片识别工具，使用DeepSeek-VL模型识别图片内容，支持自定义识别问题",
-)(image_recognizer_instance.recognize_image)
-
-
-# 注册到mcp,是他发挥fastmcp一样的功能
-def register_image_recognize_tool():
-    """注册图片识别工具（确保只注册一次）"""
-    global _IMAGE_RECOGNIZE_TOOL_REGISTERED
-    if not _IMAGE_RECOGNIZE_TOOL_REGISTERED:
-        try:
-            mcp.add_tool(image_recognizer_instance.recognize_image)
-            _IMAGE_RECOGNIZE_TOOL_REGISTERED = True
-        except Exception as e:
-            _IMAGE_RECOGNIZE_TOOL_REGISTERED = True
-
-
-register_image_recognize_tool()
-
-
-def get_image_recognizer_tool():
-    """获取图片识别工具实例"""
-    return image_recognizer_instance

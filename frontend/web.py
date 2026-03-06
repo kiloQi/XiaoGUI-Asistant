@@ -1,180 +1,417 @@
 import streamlit as st
 import requests
 import json
-import os
+import uuid
+from datetime import datetime
 import time
 
-# 配置区域
-BACKEND_URL = "http://127.0.0.1:8000"
-UPLOAD_URL = f"{BACKEND_URL}/upload_and_parse"
-CHAT_URL = f"{BACKEND_URL}/chat"
+
+# ==============================================================================
+# 1. 页面基础配置
+# ==============================================================================
 st.set_page_config(
-    page_title="小桂助手 - AI 智能体",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="小桂助手",
+    page_icon="logo.png",
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
-# 初始化会话状态
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "current_file_path" not in st.session_state:
-    st.session_state.current_file_path = None
-if "rag_status" not in st.session_state:
-    st.session_state.rag_status = "未加载文档"
-
-import uuid
-if "thread_id" not in st.session_state:
-    st.session_state.thread_id = str(uuid.uuid4())
-
-# CSS (美化界面)
+# ==============================================================================
+# 2. 注入自定义 CSS (保持你的极简黑白风格)
+# ==============================================================================
 st.markdown("""
 <style>
-    .stChatMessage {padding: 10px;}
-    .status-badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.85em;
-        font-weight: bold;
-        margin-bottom: 10px;
+    /* --- 全局重置 --- */
+    .stApp {
+        background-color: #ffffff;
+        color: #000000;
+        font-family: 'Georgia', 'Times New Roman', serif;
     }
-    .status-thinking {background-color: #fff3cd; color: #856404;}
-    .status-searching {background-color: #d1ecf1; color: #0c5460;}
-    .status-tool {background-color: #d4edda; color: #155724;}
+
+    /* --- 隐藏侧边栏和页脚 --- */
+    #MainMenu, footer, header, .stDeployButton {
+        visibility: hidden;
+        display: none;
+    }
+
+    /* --- 标题区域设计 --- */
+    .custom-header {
+        padding: 40px 0 20px 0;
+        border-bottom: 2px solid #000;
+        margin-bottom: 30px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 15px;
+    }
+    .main-title {
+        font-size: 36px;
+        font-weight: 900;
+        letter-spacing: -1.5px;
+        margin: 0;
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        text-transform: uppercase;
+    }
+
+    /* --- 导出按钮特殊样式 --- */
+    .export-btn button {
+        background: #fff;
+        color: #000;
+        border: 1px solid #000;
+        border-radius: 0;
+        padding: 8px 16px;
+        font-weight: 700;
+        text-transform: uppercase;
+        font-size: 10px;
+        letter-spacing: 1px;
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        transition: all 0.2s ease;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    .export-btn button:hover {
+        background: #000;
+        color: #fff;
+        transform: translateY(-2px);
+        box-shadow: 2px 2px 0px #000;
+    }
+
+    /* --- 聊天消息容器 --- */
+    .stChatMessage {
+        background: transparent !important;
+        border: 1px solid #000;
+        border-radius: 0 !important;
+        padding: 20px !important;
+        margin: 20px 0 !important;
+        box-shadow: none !important;
+    }
+
+    /* --- 彻底隐藏头像 --- */
+    .stChatMessage .stAvatar {
+        display: none !important;
+        width: 0 !important;
+        height: 0 !important;
+        visibility: hidden !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    /* --- 消息内容排版 --- */
+    .stChatMessage .stMarkdown {
+        font-size: 16px;
+        line-height: 1.8;
+        color: #000;
+        font-weight: 400;
+        padding-left: 0 !important;
+        margin-left: 0 !important;
+        max-width: 100%;
+    }
+
+    /* 用户消息加粗 */
+    .stChatMessage[data-testid="stChatMessage"]:nth-child(odd) .stMarkdown {
+        font-weight: 700;
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        font-size: 16px;
+    }
+
+    /* --- 隐藏时间戳 --- */
+    .stChatMessage .stMetadata {
+        display: none !important;
+        visibility: hidden !important;
+        height: 0 !important;
+        font-size: 0 !important;
+    }
+
+    /* --- 上传区域设计 --- */
+    .upload-wrapper {
+        margin-bottom: 20px;
+        padding: 0; 
+    }
+
+    .stFileUploader label {
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: #000;
+        margin-bottom: 5px;
+    }
+    .stFileUploader div[data-testid="stFileDropzone"] {
+        border: 1px solid #ccc !important;
+        background: #fff !important;
+        border-radius: 0 !important;
+        padding: 10px !important;
+        min-height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .stFileUploader div[data-testid="stFileDropzone"]:hover {
+        background: #f9f9f9 !important;
+        border-color: #000 !important;
+    }
+
+    /* --- 输入框区域设计 --- */
+    .stChatInputContainer {
+        border-top: 2px solid #000;
+        padding-top: 20px;
+        margin-top: 20px;
+    }
+
+    .stChatInputTextArea textarea {
+        border: 1px solid #ccc;
+        background: #fff;
+        color: #000;
+        font-size: 16px;
+        font-family: 'Georgia', serif;
+        resize: none;
+        box-shadow: none !important;
+        padding: 15px;
+        line-height: 1.6;
+        border-radius: 0 !important;
+    }
+    .stChatInputTextArea textarea:focus {
+        outline: none;
+        border-color: #000 !important;
+        box-shadow: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# 侧边栏：文件上传与 RAG
-with st.sidebar:
-    st.header("📂 知识库管理")
-    st.markdown("上传 PDF/TXT/Word 文档，让小桂学习后再回答。")
 
+# ==============================================================================
+# 3. 辅助功能：导出逻辑
+# ==============================================================================
+def format_chat_history():
+    """将聊天记录格式化为文本"""
+    if not st.session_state.get("messages", []):
+        return "暂无聊天记录。"
+
+    history_text = f"小桂助手聊天记录\n生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+    history_text += "=" * 40 + "\n\n"
+
+    for msg in st.session_state.messages:
+        role = "用户" if msg["role"] == "user" else "助手"
+        content = msg["content"]
+        history_text += f"[{role}]:\n{content}\n\n"
+        history_text += "-" * 20 + "\n\n"
+
+    return history_text
+
+
+# ==============================================================================
+# 4. 后端通信逻辑
+# ==============================================================================
+def get_thread_id():
+    if "thread_id" not in st.session_state:
+        st.session_state.thread_id = str(uuid.uuid4())
+    return st.session_state.thread_id
+
+
+def upload_file_to_backend(file):
+    """上传文件到后端"""
+    url = "http://localhost:8000/upload_and_parse"
+    try:
+        files = {"file": (file.name, file.getvalue(), file.type)}
+        response = requests.post(url, files=files, timeout=120)
+        if response.status_code == 200:
+            return True, response.json().get("message", "上传成功")
+        else:
+            return False, f"上传失败：{response.text}"
+    except Exception as e:
+        return False, f"连接错误：{str(e)}"
+
+
+def stream_response(message):
+    """流式获取后端响应（含历史记录清洗）"""
+
+    # --- 🚑 紧急修复：清洗残缺的 tool_calls 历史 ---
+    # 如果 session_state 里有 messages，检查是否有未闭合的 tool_calls
+    if "messages" in st.session_state:
+        clean_messages = []
+        i = 0
+        while i < len(st.session_state.messages):
+            msg = st.session_state.messages[i]
+
+            # 如果这条消息有 tool_calls
+            if msg.get("role") == "assistant" and "tool_calls" in msg:
+                # 检查下一条是不是 tool 类型的回复
+                if i + 1 < len(st.session_state.messages) and st.session_state.messages[i + 1].get("role") == "tool":
+                    # 正常：保留这两条
+                    clean_messages.append(msg)
+                    clean_messages.append(st.session_state.messages[i + 1])
+                    i += 2
+                else:
+                    # ❌ 异常：有 tool_calls 但没有后续 tool 回复 -> 丢弃这条 assistant 消息
+                    # 防止发送给后端导致 400 错误
+                    print(f"⚠️ 检测到残缺的 tool_calls 消息，已自动丢弃：{msg.get('content', '')[:20]}...")
+                    i += 1
+            else:
+                # 普通消息，直接保留
+                clean_messages.append(msg)
+                i += 1
+
+        # 更新清洗后的历史
+        st.session_state.messages = clean_messages
+    # ------------------------------------------------
+
+    url = "http://localhost:8000/chat"
+
+    # 注意：这里发送给后端的 payload 可能包含了 history
+    # 如果你的后端是自己维护 history，那上面这段清洗主要在本地防错
+    # 如果后端依赖前端传 history，你可能需要把 clean_messages 也传过去
+
+    payload = {
+        "message": message,
+        "config": {"thread_id": get_thread_id()}
+    }
+
+    try:
+        with requests.post(url, json=payload, stream=True, timeout=180) as r:
+            r.raise_for_status()  # 这里会抛出 400 错误
+            for line in r.iter_lines(decode_unicode=True):
+                if line:
+                    line = line.strip()
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(data_str)
+                            chunk = data.get("content", "")
+                            if chunk and isinstance(chunk, str):
+                                yield chunk
+                        except json.JSONDecodeError:
+                            continue
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 400:
+            yield "❌ **对话上下文出错**：检测到历史记录中有未完成的工具调用。\n\n建议：\n1. 点击左上角刷新页面重新开始对话。\n2. 或者联系开发者修复后端逻辑。"
+        else:
+            yield f"❌ 请求失败：{str(e)}"
+    except requests.exceptions.ConnectionError:
+        yield "❌ 无法连接后端 (端口 8000)。请确认后端已启动。"
+    except Exception as e:
+        yield f"❌ 错误：{str(e)}"
+# ==============================================================================
+# 5. 主界面渲染
+# ==============================================================================
+
+# --- 初始化状态锁 (防止并发冲突) ---
+if "is_learning" not in st.session_state:
+    st.session_state.is_learning = False
+if "current_file_name" not in st.session_state:
+    st.session_state.current_file_name = None
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# --- 顶部标题 + 导出按钮 ---
+col_title, col_btn = st.columns([3, 1])
+
+with col_title:
+    st.markdown('<div class="main-title">小桂助手</div>', unsafe_allow_html=True)
+
+with col_btn:
+    chat_data = format_chat_history()
+    file_name = f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    st.download_button(
+        label="导出会话记录",
+        data=chat_data,
+        file_name=file_name,
+        mime="text/plain",
+        key="download_chat",
+        help="下载当前对话记录为 TXT 文件"
+    )
+
+st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+
+# --- 渲染历史消息 ---
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# --- 布局调整：上传组件旁置 ---
+col_upload, col_space = st.columns([3, 7])
+
+with col_upload:
+    # 如果正在学习中，禁用上传器视觉反馈（可选）
     uploaded_file = st.file_uploader(
-        "选择文件",
-        type=["txt", "pdf", "docx", "doc", "md"],
-        help="支持 txt, pdf, docx 等格式"
+        "上传文档/图片",
+        type=['pdf', 'docx', 'txt', 'png', 'jpg', 'jpeg'],
+        key="uploader",
+        help="支持 PDF, Word, TXT, PNG, JPG",
+        disabled=st.session_state.is_learning  # 🔒 学习中禁止上传
     )
 
     if uploaded_file is not None:
-        # 显示文件信息
-        st.info(f"📄 **{uploaded_file.name}**\n大小：{uploaded_file.size / 1024:.2f} KB")
+        # 检查是否是同一个文件重复触发
+        if st.session_state.get("last_uploaded_file") != uploaded_file.name:
+            if st.session_state.is_learning:
+                st.warning(f"️ 正在学习：{st.session_state.current_file_name}，请稍候...")
+            else:
+                # 🔒 加锁
+                st.session_state.is_learning = True
+                st.session_state.current_file_name = uploaded_file.name
 
-        if st.button(" 上传并解析到知识库", type="primary"):
-            with st.spinner("⏳ 正在上传并解析文档..."):
-                try:
-                    files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
-                    response = requests.post(UPLOAD_URL, files=files, timeout=60)
-
-                    if response.status_code == 200:
-                        result = response.json()
-                        if result.get("status") == "success":
-                            st.success("✅ 文档解析成功！已存入向量库。")
-                            # 保存文件路径，以便在聊天工作流中使用
-                            st.session_state.current_file_path = result.get("saved_path")
-                            st.session_state.rag_status = f"已加载：{uploaded_file.name}"
-
-                            # 自动添加一条系统消息提示用户
-                            st.session_state.messages.append({
-                                "role": "assistant",
-                                "content": f"我已经学习了《{uploaded_file.name}》，你可以问我关于它的内容了！（共解析 {result['parse_data']['chunk_count']} 个片段）"
-                            })
-                        else:
-                            st.error(f"❌ 解析失败：{result.get('message')}")
+                with st.spinner("解析中..."):
+                    success, message = upload_file_to_backend(uploaded_file)
+                    if success:
+                        st.success(f"✅ {message}")
+                        st.session_state.last_uploaded_file = uploaded_file.name
                     else:
-                        st.error(f"❌ 服务器错误：{response.status_code}")
-                except Exception as e:
-                    st.error(f"❌ 连接失败：{str(e)}\n请确保后端 main.py 已启动。")
+                        st.error(f"❌ {message}")
 
-    st.divider()
-    st.markdown(f"**当前状态**: {st.session_state.rag_status}")
-    if st.session_state.current_file_path:
-        st.code(st.session_state.current_file_path, language="text")
+                    # 🔓 解锁
+                    st.session_state.is_learning = False
+                    st.session_state.current_file_name = None
+                    # 强制刷新以清除上传状态
+                    st.rerun()
 
-    if st.button("🗑 清空对话历史"):
-        st.session_state.messages = []
-        st.rerun()
+# --- 处理用户输入 (最终稳定版) ---
+if st.session_state.is_learning:
+    st.warning(f"📚 正在学习文件：**{st.session_state.current_file_name}**\n\n请先等待文件解析完成后再提问。")
+    st.stop()
 
-#主界面：聊天对话框
-st.title("🤖 小桂助手")
-st.markdown("基于 LangGraph + FastAPI + Streamlit | 支持 RAG 检索与工具调用")
-
-# 显示历史消息
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-# 聊天输入框
-if prompt := st.chat_input("请输入问题，或上传文件让我学习..."):
+if prompt := st.chat_input("向小桂提问"):
     # 1. 显示用户消息
-    st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # 2. 准备发送给后端的数据
-    payload = {
-        "message": prompt,
-        "file_path": st.session_state.current_file_path ,     # 如果有文件，传过去
-        "config": {
-            "configurable": {
-                "thread_id": st.session_state.thread_id
-            }
-        }
-    }
-
-    # 3. 调用后端并流式显示
+    # 2. 助手回复区域
     with st.chat_message("assistant"):
-        status_placeholder = st.empty()        # 用于显示动态状态
-        response_placeholder = st.empty()      # 用于显示打字机效果
+        # 【关键修改 1】创建一个唯一的、稳定的占位符
+        response_placeholder = st.empty()
 
         full_response = ""
 
-        # 模拟状态更新
-        if "计算" in prompt or "时间" in prompt:
-            status_placeholder.markdown('<span class="status-badge status-tool">🛠 正在调用工具...</span>',
-                                        unsafe_allow_html=True)
-        elif st.session_state.current_file_path:
-            status_placeholder.markdown('<span class="status-badge status-searching">🔍 正在检索知识库...</span>',
-                                        unsafe_allow_html=True)
-        else:
-            status_placeholder.markdown('<span class="status-badge status-thinking"> 正在思考...</span>',
-                                        unsafe_allow_html=True)
+        # 【关键修改 2】设置最小渲染间隔 (秒)，防止 DOM 操作过快崩溃
+        # 0.05 秒 = 50 毫秒，人眼感觉是流畅的，但给浏览器留了喘息时间
+        MIN_RENDER_INTERVAL = 0.05
+        last_render_time = 0
 
         try:
-            # 尝试请求流式接口 /chat
-            response = requests.post(CHAT_URL, json=payload, stream=True, timeout=30)
+            for chunk in stream_response(prompt):
+                if chunk:
+                    full_response += chunk
 
-            if response.status_code == 200:
-                for line in response.iter_lines():
-                    if line:
-                        decoded_line = line.decode("utf-8")
-                        if decoded_line.startswith("data: "):
-                            data = json.loads(decoded_line[6:])
-                            token = data.get("token", "")
-                            full_response += token
-                            response_placeholder.markdown(full_response + "▌")
-            else:
-                # 如果后端返回非 200，直接显示错误
-                full_response = f"⚠️ 后端响应异常：{response.status_code}"
-                response_placeholder.markdown(full_response)
+                    current_time = time.time()
 
-        except requests.exceptions.ConnectionError:
-            time.sleep(1)
-            if "计算" in prompt:
-                full_response = "🛠️ [模拟] 正在调用计算器工具...\n结果是：..."
-            elif st.session_state.current_file_path:
-                full_response = "🔍 [模拟] 已在知识库中检索到相关内容...\n根据文档，《" + os.path.basename(
-                    st.session_state.current_file_path) + "》中提到..."
-            else:
-                full_response = f"小桂收到：'{prompt}'。\n(提示：请确保后端 main.py 中实现了 /chat 接口以支持真实流式对话)"
+                    # 【关键修改 3】只有距离上次渲染超过间隔，才更新 UI
+                    if current_time - last_render_time > MIN_RENDER_INTERVAL:
+                        # 使用 replace 确保光标始终在最后，且内容完整
+                        response_placeholder.markdown(full_response + "▌")
+                        last_render_time = current_time
 
+            # 循环结束，确保最后一段（不足间隔的部分）也被渲染，并去掉光标
             response_placeholder.markdown(full_response)
 
-        finally:
-            status_placeholder.empty()
-            # 保存最终回复
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
+        except Exception as e:
+            # 出错时也要把已有的内容显示出来，并提示错误
+            error_msg = f"\n\n*(⚠️ 连接中断：{str(e)})*"
+            response_placeholder.markdown(full_response + error_msg)
+            print(f"Stream error: {e}")
 
-#底部说明
-st.markdown("---")
-st.caption(" 提示：上传文件后，请在对话框中输入与该文件相关的问题，系统将自动触发 RAG 检索。")
+    # 3. 保存历史
+    st.session_state.messages.append({"role": "assistant", "content": full_response})

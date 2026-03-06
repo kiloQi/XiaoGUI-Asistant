@@ -2,8 +2,7 @@ import os
 import requests
 from typing import Dict,Any
 
-from backend.main import mcp
-@mcp.tool()
+
 def get_weather(city_name:str) -> Dict[str,Any]:
     """
     查询指定城市的实时天气

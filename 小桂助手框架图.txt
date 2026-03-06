@@ -10,9 +10,7 @@ XiaoGui-Assistant/        <-- 项目总文件夹（根目录）
 │   │   └── weather_tool.py  <-- 计算器工具
 │   │   └── web_search_tool.py  <-- 联网搜索工具
 │   │   └── export_chat_tool.py  <-- 导出聊天记录工具
-│   │   └── file_parsing_tool.py   <-- 文档解析工具
-│   └── config/           <-- 配置文件
-│       └── settings.py   <-- 存放 API Key 和 模型名称
+│      └── file_parsing_tool.py   <-- 文档解析工具
 │
 ├── frontend/             <-- 前端代码区（Streamlit）
 │   └── web.py            <-- 网页界面代码（聊天窗口）
