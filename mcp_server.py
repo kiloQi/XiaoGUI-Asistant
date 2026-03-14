@@ -3,13 +3,13 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("XiaoGui-Tool")
 
-from backend.tools.file_parsing_tool import parse_file
-from backend.tools.calc_tool import calculate
-from backend.tools.time_tool import get_current_time
-from backend.tools.weather_tool import get_weather
-from backend.tools.web_search_tool import web_search
-from backend.tools.export_chat_tool import save_messages_to_markdown
-from backend.tools.image_recognition_tool import analyze_image
+from backend.tools.file_parsing_tool import parse_file as parse_file_impl
+from backend.tools.calc_tool import calculate as calculate_impl
+from backend.tools.time_tool import get_current_time as get_current_time_impl
+from backend.tools.weather_tool import get_weather as get_weather_impl
+from backend.tools.web_search_tool import web_search as web_search_impl
+from backend.tools.export_chat_tool import save_messages_to_markdown as save_messages_impl
+from backend.tools.image_recognition_tool import analyze_image as analyze_image_impl
 
 @mcp.tool()
 def save_messages_to_markdown(messages,file_name:str="chat_log")->str:
@@ -23,7 +23,7 @@ def save_messages_to_markdown(messages,file_name:str="chat_log")->str:
         Returns:
             str: 操作结果描述（包含成功提示和文件路径，或错误信息）
         """
-    result = save_messages_to_markdown(messages, file_name)
+    result = save_messages_impl(messages, file_name)
     return result
 
 @mcp.tool()
@@ -39,7 +39,7 @@ def calculate(expression:str):
         Returns:
             str: 计算结果字符串。
         """
-    result = calculate(expression)
+    result =calculate_impl(expression)
     return result
 
 @mcp.tool()
@@ -55,13 +55,13 @@ def parse_file(file_path: str) -> List[str]:
         Returns:
             List[str]: 解析后的文本片段列表，每个元素是一段文本。
         """
-    result = parse_file(file_path)
+    result = parse_file_impl(file_path)
     return result
 
 @mcp.tool()
 def analyze_image(image_path: str) -> Optional[str]:
     """
-       分析本地图片内容，识别图中的物体、文字、场景或描述图片内容。
+       分析本地图篇内容，识别图中的物体、文字、场景或描述图篇内容。
        适用于用户上传了图片并询问“这是什么”、“图里有什么”或需要提取图中文字的场景。
 
        Args:
@@ -71,7 +71,7 @@ def analyze_image(image_path: str) -> Optional[str]:
            Optional[str]: 图片的分析描述文本。如果分析失败返回 None。
        """
 
-    result = analyze_image(image_path)
+    result = analyze_image_impl(image_path)
     return result
 
 @mcp.tool()
@@ -83,7 +83,7 @@ def get_current_time():
         Returns:
             str: 格式化的当前时间字符串 (例如："2026-03-14 星期六 17:06")。
         """
-    result = get_current_time()
+    result = get_current_time_impl()
     return result
 
 @mcp.tool()
@@ -99,7 +99,7 @@ def get_weather(city_name:str) -> Dict[str,Any]:
     Returns:
         Dict[str, Any]: 包含天气详细信息的字典 (如 temperature, condition, humidity 等)。
     """
-    result = get_weather(city_name)
+    result = get_weather_impl(city_name)
     return result
 
 @mcp.tool()
@@ -114,7 +114,7 @@ def web_search(query: str) -> str:
         Returns:
             str: 搜索结果的摘要或关键信息片段。
         """
-    result = web_search(query)
+    result =web_search_impl(query)
     return result
 print("正在启动 XiaoGui-Assistant MCP Server...")
 mcp.run()

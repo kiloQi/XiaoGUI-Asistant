@@ -21,7 +21,7 @@ load_dotenv()
 tool_list = []
 
 
-recognize_image_func = None
+
 
 
 # 2. 初始化大模型
@@ -106,7 +106,7 @@ class RAGAgent:
             elif ext in [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"]:
                 try:
                     print(f"检测到图片，正在调用豆包视觉模型进行视觉分析：{os.path.basename(file_path)}")
-
+                    from backend.tools.image_recognition_tool import analyze_image as recognize_image_func
                     description = recognize_image_func(file_path)
 
 
