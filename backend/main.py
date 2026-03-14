@@ -32,6 +32,28 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app:FastAPI):
     global workflow_app
+    logger.info("正在启动 XiaoGui (FastMCP 模式)...")
+
+    mcp_tools = []
+    try:
+
+        mcp_script_path = r"D:\XiaoGui-Assistant\mcp_server.py"
+        logger.info(f"正在连接 MCP Server: {mcp_script_path}")
+
+        client = MultiServerMCPClient({
+            "XiaoGuiTools": {
+                "command": sys.executable,
+                "args": [mcp_script_path],
+                "transport": "stdio"
+            }
+        })
+
+        mcp_tools = await client.get_tools()
+        logger.info(f"✅ MCP 连接成功！获取到 {len(mcp_tools)} 个工具: {[t.name for t in mcp_tools]}")
+    except Exception as e:
+        logger.error(f"❌ MCP 连接失败: {e}")
+        logger.warning("⚠️ 将以无工具模式运行")
+
     if 'sqlite3' in sys.modules:
         logger.info("  sqlite3 已加载")
     else:
@@ -41,7 +63,7 @@ async def lifespan(app:FastAPI):
     try:
         from langgraph.checkpoint.memory import MemorySaver
         saver = MemorySaver()
-        graph_builder = await build_workflow()     #“异步启动”：用了 async/await，体现高性能。
+        graph_builder = await build_workflow(tools=mcp_tools)     #“异步启动”：用了 async/await，体现高性能。
         workflow_app = graph_builder.compile(checkpointer=saver)
         logger.info("✅ 服务启动成功 (支持流式输出)")
         yield

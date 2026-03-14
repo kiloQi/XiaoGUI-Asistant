@@ -21,38 +21,9 @@ if project_root not in sys.path:
 load_dotenv()
 tool_list = []
 
-try:
-    # 导入普通函数工具
-    from backend.tools.file_parsing_tool import parse_file
-    from backend.tools.calc_tool import calculate
-    from backend.tools.time_tool import get_current_time
-    from backend.tools.weather_tool import get_weather
-    from backend.tools.web_search_tool import web_search
-    from backend.tools.export_chat_tool import save_messages_to_markdown
 
-    # 导入图片识别工具
-    from backend.tools.image_recognition_tool import analyze_image
+recognize_image_func = None
 
-
-    recognize_image_func = analyze_image
-
-    # 组建工具列表
-    tool_list = [
-        parse_file,
-        calculate,
-        recognize_image_func,
-        web_search,
-        get_weather,
-        get_current_time,
-        save_messages_to_markdown
-    ]
-    print(f"✅ 成功加载 {len(tool_list)} 个工具")
-
-except Exception as e:
-    print(f"⚠️ 警告：工具导入失败，请检查路径。错误信息：{e}")
-    import traceback
-    #traceback.print_exc() 是 Python 中用于打印异常堆栈信息的函数。
-    traceback.print_exc()
 
 # 2. 初始化大模型
 llm = ChatOpenAI(
@@ -425,9 +396,16 @@ def should_continue(state: AgentState) -> str:
         return "END"
 
 
-async def build_workflow():
-    workflow = StateGraph(AgentState)
+async def build_workflow(tools=None):
+    global llm_with_tools, tool_list
 
+    if tools:
+        tool_list = tools
+        llm_with_tools = llm.bind_tools(tool_list)
+        print(f"✅ [MCP] 成功注入 {len(tools)} 个工具！")
+    else:
+        print("⚠️ 警告：未传入工具。")
+    workflow = StateGraph(AgentState)
     # 1. 注册所有业务节点
     workflow.add_node("uploader", file_upload_node)
     workflow.add_node("retriever", retriever_node)
