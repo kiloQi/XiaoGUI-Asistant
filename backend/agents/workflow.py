@@ -9,6 +9,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.messages import BaseMessage, AIMessage, ToolMessage, HumanMessage, SystemMessage
 import os
 import sys
+from langchain_core.tools import BaseTool
 
 # 将项目根目录加入系统路径
 project_root = r"D:/XiaoGui-Assistant"
@@ -257,13 +258,17 @@ rag_agent = RAGAgent()
 
 # 4. 定义工作流状态
 class AgentState(TypedDict):
+    #List[BaseMessage]：这是一个列表，
+    # 里面存着所有的对话消息（用户说的、AI 说的、系统提示词）。
     messages: Annotated[List[BaseMessage], operator.add]
     context: str
+
+    #Optional[str]：表示这个文件路径可能有，也可能没有（可以是 None）。
+    #它起到了一个开关的作用，告诉工作流：“这一轮用户带了文件，需要特殊处理”。
     uploaded_file: Optional[str]
 
 
 # 5. 定义节点
-
 def file_upload_node(state: AgentState):
     """文件上传与入库节点"""
     file_path = state.get("uploaded_file")
@@ -301,7 +306,7 @@ def retriever_node(state: AgentState):
 
     # 获取用户最后一条消息
     last_msg = messages[-1]
-    if isinstance(last_msg, HumanMessage):
+    if isinstance(last_msg, HumanMessage):  #校验最后一条消息是否为 HumanMessage，避免了在 AI 回复或系统内部流转时触发无效的检索操作
         query = last_msg.content
         context_docs = rag_agent.search(query)
         context_str = "\n\n".join(context_docs) if context_docs else ""
@@ -321,7 +326,7 @@ def chat_think_node(state: AgentState):
 
 【最高优先级指令】：
 1. **必须使用参考资料**：下方的【参考资料】包含了最新的实时信息（如新闻、冲突、天气等）。你**必须**基于这些资料回答用户问题。
-2. **严禁否认工具**：既然你已经看到了【参考资料】，说明工具调用**已经成功**。**绝对禁止**回答“搜索失败”、“无法获取最新信息”或“网络错误”等话术。
+2. **处理冲突**：如果【参考资料】的内容与你训练数据中的旧知识冲突，**必须以【参考资料】为准**。
 3. **处理冲突**：如果【参考资料】的内容与你训练数据中的旧知识冲突，**必须以【参考资料】为准**。
 4. **图片内容**：参考资料中可能包含对图片的文字描述，请将其视为图片内容的真实反映。
 
@@ -335,19 +340,22 @@ def chat_think_node(state: AgentState):
 如果需要计算、查天气、搜网页或识别图片，请调用相应工具。
 注意：如果调用了工具并获得了结果，必须在回答中体现这些结果，不要假装没看到。"""
 
-    # 在消息列表前插入 System Message
+    # 在消息列表前插入 SystemMessage
     # 注意：LangGraph 中，SystemMessage 通常放在列表最前面
     full_messages = [SystemMessage(content=system_prompt)] + messages
 
     try:
         response = llm_with_tools.invoke(full_messages)
+
         # LangGraph 会自动通过 Annotated 把 response 追加到 messages
         return {"messages": [response]}
+
     except Exception as e:
         error_msg = f"大模型调用失败：{str(e)}"
         print(error_msg)
         # 这里返回错误消息，让工作流继续，而不是直接崩溃
         return {"messages": [AIMessage(content=error_msg)]}
+
 def tools_node(state: AgentState):
     """工具执行节点"""
     messages = state["messages"]
@@ -358,6 +366,8 @@ def tools_node(state: AgentState):
         # 构建工具映射表 (名字 -> 函数)
         tool_map = {}
         for t in tool_list:
+            #对象实例：比如 SearchTool()，它的名字通常存在 .name 属性里。
+            #普通函数：比如 def search_weather(...)，函数没有 .name 属性，但有一个内置的 __name__ 属性。
             name = getattr(t, 'name', getattr(t, '__name__', ''))
             if name:
                 tool_map[name] = t
@@ -373,9 +383,10 @@ def tools_node(state: AgentState):
                 try:
                     # 统一调用方式：如果是字典参数则解包，否则直接传
                     if isinstance(args, dict):
-                        observation = selected_tool(**args)
+                        # args 是从大模型那里拿到的参数，可能是字典，也可能是其他类型
+                        observation = selected_tool(**args) # 使用 ** 操作符进行“解包”
                     else:
-                        observation = selected_tool(args)
+                        observation = selected_tool(args) #参数不是字典（比如是字符串、数字，或者直接就是一个对象）直接整个丢进去
 
                     results.append(ToolMessage(
                         content=str(observation),
@@ -425,7 +436,7 @@ async def build_workflow():
 
     # 2.创建一个“空”入口节点，只负责传递状态
     def pass_through(state: AgentState):
-        return {}  # 返回空字典，不改变任何状态
+        return {}    # 返回空字典，不改变任何状态
 
     workflow.add_node("entry", pass_through)
 
@@ -439,6 +450,7 @@ async def build_workflow():
         else:
             return "retriever"
 
+    #条件分支 (conditional_edges)
     workflow.add_conditional_edges(
         source="entry",
         path=route_decision,

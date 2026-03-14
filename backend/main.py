@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 import json
 from contextlib import asynccontextmanager
 from langchain_core.messages import HumanMessage
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
 # 从 workflow.py 导入
 from backend.agents.workflow import build_workflow, rag_agent
