@@ -9,7 +9,6 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.messages import BaseMessage, AIMessage, ToolMessage, HumanMessage, SystemMessage
 import os
 import sys
-from langchain_core.tools import BaseTool
 
 # 将项目根目录加入系统路径
 project_root = r"D:/XiaoGui-Assistant"
