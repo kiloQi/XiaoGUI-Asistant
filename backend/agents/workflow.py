@@ -18,7 +18,6 @@ if project_root not in sys.path:
     print(f"✅ 已强制添加项目根目录到路径：{project_root}")
 
 load_dotenv()
-
 tool_list = []
 
 try:
@@ -51,7 +50,7 @@ try:
 except Exception as e:
     print(f"⚠️ 警告：工具导入失败，请检查路径。错误信息：{e}")
     import traceback
-
+    #traceback.print_exc() 是 Python 中用于打印异常堆栈信息的函数。
     traceback.print_exc()
 
 # 2. 初始化大模型
@@ -87,7 +86,10 @@ class RAGAgent:
             self.embedding_model = HuggingFaceEmbeddings(
                 model_name=model_name,
                 model_kwargs={'device': 'cpu'},
+                # (向量归一化)：含义：把计算出来的向量（一串数字）的长度强行压缩到 1（单位向量）。
+                # 这能大幅提高 FAISS 检索的速度和准确性，避免因向量长度差异导致的评分偏差。
                 encode_kwargs={'normalize_embeddings': True}
+
             )
             print("✅ 嵌入模型加载成功")
         except Exception as e:
@@ -100,22 +102,26 @@ class RAGAgent:
             print(f"❌ 文件不存在：{file_path}")
             return []
 
-        ext = os.path.splitext(file_path)[1].lower()
+        ext = os.path.splitext(file_path)[1].lower()   #获取文件后缀名，并转化为小写
         loader = None
 
         try:
             # 1. 根据扩展名选择加载器
             if ext == ".txt":
-                #尝试多种编码
+                #尝试多种编码，中文 Windows 系统生成的 TXT 文件常用 GBK 编码
                 encodings = ['utf-8', 'gbk', 'gb2312', 'latin-1']
                 for enc in encodings:
                     try:
                         loader = TextLoader(file_path, encoding=enc)
-                        loader.load()
                         print(f"✅ 使用 {enc} 编码加载 TXT 成功")
                         break
+
+                        #“如果在读取或处理当前文件时发生了
+                        # 编码错误（UnicodeDecodeError）或任何其他意外错误（Exception），
+                        # 直接跳过这个文件，继续处理下一个文件，不要中断整个程序。”
                     except (UnicodeDecodeError, Exception):
                         continue
+
                 if loader is None:
                     raise ValueError("无法识别的文本编码")
 
@@ -172,8 +178,12 @@ class RAGAgent:
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=500,
                 chunk_overlap=50,
-                length_function=len,
+                length_function=len,  #使用 Python 内置的 len() 函数来计算长度。
                 separators=["\n\n", "\n", " ", ""]
+                #先试着按双换行符（段落）切分,
+                # 如果某段落太长，再试着按单换行符（行）切分。
+                # 如果某一行还太长，再试着按空格（单词）切分。
+                # 如果连单词都太长了（比如一串超长的乱码或 URL），那就只能强制按字符切断
             )
 
             chunks = text_splitter.split_documents(documents)
@@ -195,10 +205,19 @@ class RAGAgent:
             return False
         try:
             print(f" 正在计算 {len(texts)} 条文本的向量...")
-            all_vectors = self.embedding_model.embed_documents(texts)
-            print(f" 向量计算完成：{len(all_vectors)} x {len(all_vectors[0])}")
+            all_vectors = self.embedding_model.embed_documents(texts)   #.embed_documents(texts):这是批量处理的方法。
+            # len(all_vectors[0])获取第一个向量的长度。含义：向量的维度是多少。
 
+            print(f" 向量计算完成：{len(all_vectors)} x {len(all_vectors[0])}")
+            #输出是：成功将A个文本片段转换成了B维的向量。
+
+            #为每一段文本准备了一个空的字典 {} 作为“元数据”。
+            # 虽然代码里目前是空字典，但 FAISS 强制要求传入这个参数。
+            # 现在的空字典是为未来的混合检索或元数据过滤打下架构基础。
             metadatas = [{} for _ in texts]
+
+            #zip(texts, all_vectors) 的作用就是把这两个列表一一对应地捆起来。
+            # text_embeddings 参数，格式必须是 [(文本，向量), (文本，向量), ...]。
             text_embedding_pairs = list(zip(texts, all_vectors))
 
             if self.vectorstore is None:
@@ -222,6 +241,7 @@ class RAGAgent:
             return False
 
     def search(self, query: str) -> List[str]:
+        """用户问一个问题，系统从知识库里找出最相关的 3 段话。"""
         if self.embedding_model is None or self.vectorstore is None:
             return []
         try:
