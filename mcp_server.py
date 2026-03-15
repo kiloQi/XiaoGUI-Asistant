@@ -6,7 +6,7 @@ mcp = FastMCP("XiaoGui-Tool")
 from backend.tools.file_parsing_tool import parse_file as parse_file_impl
 from backend.tools.calc_tool import calculate as calculate_impl
 from backend.tools.time_tool import get_current_time as get_current_time_impl
-from backend.tools.weather_tool import get_weather as get_weather_impl
+# from backend.tools.weather_tool import get_weather as get_weather_impl
 from backend.tools.web_search_tool import web_search as web_search_impl
 from backend.tools.export_chat_tool import save_messages_to_markdown as save_messages_impl
 from backend.tools.image_recognition_tool import analyze_image as analyze_image_impl
@@ -86,21 +86,21 @@ def get_current_time():
     result = get_current_time_impl()
     return result
 
-@mcp.tool()
-def get_weather(city_name:str) -> Dict[str,Any]:
-    """
-    查询指定城市的实时天气状况。
-    包含温度、天气现象 (晴/雨/雪)、湿度、风向等信息。
-    当用户询问“某地天气怎么样”、“明天要不要带伞”时使用。
-
-    Args:
-        city_name: 城市名称 (例如："北京", "Shanghai", "纽约")。
-
-    Returns:
-        Dict[str, Any]: 包含天气详细信息的字典 (如 temperature, condition, humidity 等)。
-    """
-    result = get_weather_impl(city_name)
-    return result
+# @mcp.tool()
+# def get_weather(city_name:str) -> Dict[str,Any]:
+#     """
+#     查询指定城市的实时天气状况。
+#     包含温度、天气现象 (晴/雨/雪)、湿度、风向等信息。
+#     当用户询问“某地天气怎么样”、“明天要不要带伞”时使用。
+#
+#     Args:
+#         city_name: 城市名称 (例如："北京", "Shanghai", "纽约")。
+#
+#     Returns:
+#         Dict[str, Any]: 包含天气详细信息的字典 (如 temperature, condition, humidity 等)。
+#     """
+#     result = get_weather_impl(city_name)
+#     return result
 
 @mcp.tool()
 def web_search(query: str) -> str:

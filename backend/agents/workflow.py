@@ -1,6 +1,8 @@
+import json
 from typing import TypedDict, Annotated, List, Optional
 import operator
 from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 from langchain_community.vectorstores import FAISS
@@ -18,10 +20,6 @@ if project_root not in sys.path:
     print(f"✅ 已强制添加项目根目录到路径：{project_root}")
 
 load_dotenv()
-tool_list = []
-
-
-
 
 
 # 2. 初始化大模型
@@ -32,9 +30,6 @@ llm = ChatOpenAI(
     temperature=0.8,
     streaming=True
 )
-
-# 绑定工具
-llm_with_tools = llm.bind_tools(tool_list)
 
 
 # 3. RAG 引擎
@@ -237,6 +232,9 @@ class AgentState(TypedDict):
     #它起到了一个开关的作用，告诉工作流：“这一轮用户带了文件，需要特殊处理”。
     uploaded_file: Optional[str]
 
+    #用于记录循环次数，防止死循环
+    iteration_count: int
+
 
 # 5. 定义节点
 def file_upload_node(state: AgentState):
@@ -268,6 +266,54 @@ def file_upload_node(state: AgentState):
         return {"messages": [AIMessage(content=f"❌ 发生错误：{str(e)}")]}
 
 
+def sanitize_tool_outputs(state: AgentState):
+    messages = state["messages"]
+    cleaned_messages = []
+
+    for msg in messages:
+        if hasattr(msg, 'type') and msg.type == 'tool':
+            content = msg.content
+            tool_name = getattr(msg, 'name', 'Unknown Tool')
+            print(f"成功执行工具: {tool_name}")
+
+
+            final_content = ""
+            if isinstance(content, str):
+                try:
+                    # 尝试解析是否为 MCP 格式的列表
+                    data = json.loads(content)
+                    if isinstance(data, list) and len(data) > 0:
+                        # 提取第一个 text 块的内容
+                        if 'text' in data[0]:
+                            final_content = data[0]['text']
+                        else:
+                            final_content = content  # 原样保留
+                    else:
+                        final_content = content
+                except json.JSONDecodeError:
+                    final_content = content
+            else:
+                # 非字符串强制转
+                final_content = json.dumps(content, ensure_ascii=False) if isinstance(content, (list, dict)) else str(
+                    content)
+            preview = final_content[:200] + "..." if len(final_content) > 200 else final_content
+            print(f"  [返回结果预览]:\n{preview}")
+
+            # 重建消息
+            cleaned_messages.append(
+                ToolMessage(
+                    content=final_content,  # 使用清洗后的纯文本
+                    name=getattr(msg, 'name', None),
+                    tool_call_id=getattr(msg, 'tool_call_id', None),
+                    status=getattr(msg, 'status', 'success')
+                )
+            )
+        else:
+            cleaned_messages.append(msg)
+
+    return {"messages": cleaned_messages}
+
+
 def retriever_node(state: AgentState):
     """检索节点：根据用户问题检索知识库"""
     messages = state["messages"]
@@ -286,141 +332,162 @@ def retriever_node(state: AgentState):
     return {"context": ""}
 
 
-def chat_think_node(state: AgentState):
-    """思考节点：调用 LLM (带工具)"""
-    messages = state["messages"]
-    context = state.get("context", "")
-
-    if context:
-        system_prompt = f"""你是一个智能对话助手“小桂”。
-
-【最高优先级指令】：
-1. **必须使用参考资料**：下方的【参考资料】包含了最新的实时信息（如新闻、冲突、天气等）。你**必须**基于这些资料回答用户问题。
-2. **处理冲突**：如果【参考资料】的内容与你训练数据中的旧知识冲突，**必须以【参考资料】为准**。
-3. **处理冲突**：如果【参考资料】的内容与你训练数据中的旧知识冲突，**必须以【参考资料】为准**。
-4. **图片内容**：参考资料中可能包含对图片的文字描述，请将其视为图片内容的真实反映。
-
-【参考资料】（这是真实且最新的信息）：
-{context}
-
-请根据以上资料，直接、清晰地回答用户问题。
-"""
-    else:
-        system_prompt = """你是一个智能助手小桂，请用友好的中文回答用户问题。
-如果需要计算、查天气、搜网页或识别图片，请调用相应工具。
-注意：如果调用了工具并获得了结果，必须在回答中体现这些结果，不要假装没看到。"""
-
-    # 在消息列表前插入 SystemMessage
-    # 注意：LangGraph 中，SystemMessage 通常放在列表最前面
-    full_messages = [SystemMessage(content=system_prompt)] + messages
-
-    try:
-        response = llm_with_tools.invoke(full_messages)
-
-        # LangGraph 会自动通过 Annotated 把 response 追加到 messages
-        return {"messages": [response]}
-
-    except Exception as e:
-        error_msg = f"大模型调用失败：{str(e)}"
-        print(error_msg)
-        # 这里返回错误消息，让工作流继续，而不是直接崩溃
-        return {"messages": [AIMessage(content=error_msg)]}
-
-def tools_node(state: AgentState):
-    """工具执行节点"""
-    messages = state["messages"]
-    last_msg = messages[-1]
-    results = []
-
-    if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-        # 构建工具映射表 (名字 -> 函数)
-        tool_map = {}
-        for t in tool_list:
-            #对象实例：比如 SearchTool()，它的名字通常存在 .name 属性里。
-            #普通函数：比如 def search_weather(...)，函数没有 .name 属性，但有一个内置的 __name__ 属性。
-            name = getattr(t, 'name', getattr(t, '__name__', ''))
-            if name:
-                tool_map[name] = t
-
-        for tool_call in last_msg.tool_calls:
-            name = tool_call["name"]
-            args = tool_call["args"]
-            tool_call_id = tool_call["id"]
-
-            selected_tool = tool_map.get(name)
-
-            if selected_tool:
-                try:
-                    # 统一调用方式：如果是字典参数则解包，否则直接传
-                    if isinstance(args, dict):
-                        # args 是从大模型那里拿到的参数，可能是字典，也可能是其他类型
-                        observation = selected_tool(**args) # 使用 ** 操作符进行“解包”
-                    else:
-                        observation = selected_tool(args) #参数不是字典（比如是字符串、数字，或者直接就是一个对象）直接整个丢进去
-
-                    results.append(ToolMessage(
-                        content=str(observation),
-                        name=name,
-                        tool_call_id=tool_call_id
-                    ))
-                    print(f"🛠️ 工具 [{name}] 执行成功")
-                except Exception as e:
-                    error_content = f"工具 '{name}' 执行出错：{str(e)}"
-                    results.append(ToolMessage(
-                        content=error_content,
-                        name=name,
-                        tool_call_id=tool_call_id
-                    ))
-                    print(f"❌ 工具 [{name}] 执行失败：{e}")
-            else:
-                error_content = f"错误：找不到名为 '{name}' 的工具"
-                results.append(ToolMessage(
-                    content=error_content,
-                    name=name,
-                    tool_call_id=tool_call_id
-                ))
-                print(f"❌ 未找到工具：{name}")
-
-    return {"messages": results}
-
-
-def should_continue(state: AgentState) -> str:
-    """是否下一步判断"""
-    messages = state["messages"]
-    last_msg = messages[-1]
-
-    if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-        return "tools"
-    else:
-        return "END"
-
-
 async def build_workflow(tools=None):
-    global llm_with_tools, tool_list
+    current_llm = llm
+    tool_node = None
 
     if tools:
-        tool_list = tools
-        llm_with_tools = llm.bind_tools(tool_list)
         print(f"✅ [MCP] 成功注入 {len(tools)} 个工具！")
+        current_llm = llm.bind_tools(tools)
+        tool_node = ToolNode(tools)
     else:
         print("⚠️ 警告：未传入工具。")
+
+
+
+    def chat_think_node(state: AgentState):
+        messages = state["messages"]
+        context = state.get("context", "")
+
+        # 1. 构建 System Prompt
+        if context:
+            system_prompt = f"""你是一个智能对话助手“小桂”。
+            【最高优先级指令】：
+            .1. **单次搜索原则**：针对同一个用户问题，你**最多只能调用一次** `web_search` 工具。
+.            2. **禁止连环搜**：一旦你收到了 `tool_result` (工具返回结果)，无论你觉得信息是否完美，**必须立即停止调用工具**，并基于现有结果组织语言回答用户。
+.            3.**禁止解释过程**：如果你决定调用工具，**直接输出工具调用 JSON**，严禁说“让我查一下”、“我正在搜索”等废话。
+.            4.**资料优先**：下方的【参考资料】是最新真理。如果资料里没有详细细节，**直接告诉用户“目前公开资料仅显示...”**，绝不允许为了补充细节而发起第二次搜索！
+             5. **静默执行**：如果你决定调用工具，**请直接生成工具调用请求**，严禁输出任何解释性文字（如“让我查一下”）。
+             6. **必须使用参考资料**：下方的【参考资料】包含了最新的实时信息。你**必须**基于这些资料回答。
+             7. **处理冲突**：如果【参考资料】的内容与你训练数据中的旧知识冲突，**必须以【参考资料】为准**。
+             8. **【铁律】一旦你调用了工具并获得了结果（即消息历史中包含 ToolMessage），你必须立即根据结果组织语言回答用户，严禁再次调用任何工具！**
+             9. **【禁止套娃】**：如果你已经针对同一个问题调用过 `web_search` 且获得了结果，**绝对不允许**再次调用 `web_search`。哪怕你觉得信息不够，也必须基于现有结果进行推理和回答，或者承认信息有限。
+
+            【参考资料】（这是真实且最新的信息）：
+            {context}
+
+            请根据以上资料，直接、清晰地回答用户问题。如果需要工具，请直接调用，不要废话。
+            """
+        else:
+            system_prompt = """你是一个智能助手小桂，请用友好的中文回答用户问题。
+        【铁律】如果你调用了工具（如计算器、搜索、天气等）并获得了结果，**必须立即停止调用工具**，直接使用结果回答用户！严禁对同一个问题进行重复的工具调用！
+        如果需要计算、查天气、搜网页或识别图片，请调用相应工具。
+        注意：如果调用了工具并获得了结果，必须在回答中体现这些结果。"""
+
+        clean_payload = []
+
+        # 添加 System Message
+        clean_payload.append({"role": "system", "content": system_prompt})
+
+        for i, msg in enumerate(messages):
+            role = "assistant"
+            if isinstance(msg, HumanMessage):
+                role = "user"
+            elif isinstance(msg, ToolMessage):
+                role = "tool"
+            elif isinstance(msg, AIMessage):
+                role = "assistant"
+            else:
+
+                role = "user"
+
+            raw_content = msg.content if hasattr(msg, 'content') else ""
+
+            # 强制确保 content 是字符串
+            if not isinstance(raw_content, str):
+                if isinstance(raw_content, (list, dict, tuple)):
+                    final_content = json.dumps(raw_content, ensure_ascii=False)
+                else:
+                    final_content = str(raw_content)
+            else:
+                final_content = raw_content
+
+            # 构建纯净字典
+            msg_dict = {"role": role, "content": final_content}
+
+            # 特殊处理：如果是 ToolMessage，必须包含 tool_call_id
+            if role == "tool":
+                tool_call_id = getattr(msg, 'tool_call_id', None)
+                if not tool_call_id:
+
+                    tool_call_id = f"fake_call_{i}"
+                msg_dict["tool_call_id"] = tool_call_id
+
+                # 注意：DeepSeek/Qwen 等通常不需要 tool_message 的 name 字段，但加上也无妨
+                if hasattr(msg, 'name') and msg.name:
+                    msg_dict["name"] = msg.name
+
+            # 特殊处理：如果是 AI Message 且有 tool_calls，需要保留
+            if role == "assistant" and isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
+                # 保留 tool_calls 结构，但也要确保里面的参数是干净的
+                # 通常 tool_calls 本身就是 dict 列表，可以直接用
+                msg_dict["tool_calls"] = msg.tool_calls
+
+            clean_payload.append(msg_dict)
+
+
+        # 调用 LLM
+        try:
+            response = current_llm.invoke(clean_payload)
+            return {"messages": [response]}
+        except Exception as e:
+            error_msg = f"大模型调用失败：{str(e)}"
+            print(error_msg)
+
+            return {"messages": [AIMessage(content=error_msg)]}
+
+    def should_continue(state: AgentState):
+        messages = state["messages"]
+
+        # 1. 基础数量限制
+        if len(messages) > 30:
+            print("检测到可能的死循环，强制结束对话。")
+            return "END"
+
+        last_message = messages[-1]
+
+        # 2. 如果没有工具调用，直接结束
+        if not (isinstance(last_message, AIMessage) and last_message.tool_calls):
+            return "END"
+
+        # 3.防重复调用检测 (防死循环核心)
+        # 检查过去 5 条消息中，是否已经出现过同样的工具调用
+        recent_messages = messages[-6:-1]
+        current_tool_name = last_message.tool_calls[0]['name']
+
+        tool_call_count = 0
+        for msg in recent_messages:
+            if isinstance(msg, AIMessage) and msg.tool_calls:
+                for call in msg.tool_calls:
+                    if call['name'] == current_tool_name:
+                        tool_call_count += 1
+
+        # 如果最近几轮里，同一个工具已经被调用了 2 次及以上，强制停止！
+        if tool_call_count >= 2:
+            print(f"⚠️ 检测到重复调用工具 [{current_tool_name}] 已达 {tool_call_count + 1} 次，强制终止以防止死循环！")
+            return "END"
+
+        return "tools"
+
+    # 3. 构建图
     workflow = StateGraph(AgentState)
-    # 1. 注册所有业务节点
+
+    # 注册节点
     workflow.add_node("uploader", file_upload_node)
     workflow.add_node("retriever", retriever_node)
     workflow.add_node("agent", chat_think_node)
-    workflow.add_node("tools", tools_node)
 
-    # 2.创建一个“空”入口节点，只负责传递状态
-    def pass_through(state: AgentState):
-        return {}    # 返回空字典，不改变任何状态
+    if tool_node:
+        workflow.add_node("tools", tool_node)
+        workflow.add_node("sanitize_tools", sanitize_tool_outputs)
 
-    workflow.add_node("entry", pass_through)
+    # 入口逻辑
+    def entry_pass(state: AgentState):
+        return {}
 
-    # 3. 设置入口点为 "entry"
+    workflow.add_node("entry", entry_pass)
     workflow.set_entry_point("entry")
 
-    # 4. 从 "entry" 节点出发，根据条件跳转到不同节点
     def route_decision(state: AgentState):
         if state.get("uploaded_file"):
             return "uploader"
@@ -446,8 +513,12 @@ async def build_workflow(tools=None):
         path=should_continue,
         path_map={"tools": "tools", "END": END}
     )
-
-    workflow.add_edge("tools", "agent")
+    if tool_node:
+        workflow.add_edge("tools", "sanitize_tools")
+        workflow.add_edge("sanitize_tools", "agent")
+    else:
+        # 如果没有工具，直接结束
+        workflow.add_edge("agent", END)
 
     print("✅ LangGraph 工作流编译完成！")
     return workflow

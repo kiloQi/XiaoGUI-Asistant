@@ -18,7 +18,7 @@ def web_search(query: str) -> str:
             query=query,
             search_depth="advanced",
             max_results=5,
-            include_answer=True,
+            include_answer=False,
             include_raw_content=False
         )
 
