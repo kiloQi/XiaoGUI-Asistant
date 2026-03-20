@@ -1,7 +1,6 @@
 import ast
 import operator
 import math
-from typing import Union
 
 # 定义允许的运算符映射
 ALLOWED_OPERATORS = {
@@ -103,9 +102,6 @@ def calculate(expression: str):
         # 执行安全计算
         result = safe_eval(expression)
 
-        # ✅ 修改点：去掉表情符号，去掉“计算完成”这种废话
-        # 直接告诉模型：表达式的结果是 X。
-        # 这种句式模型最容易理解，且能明确作为回答依据。
         return f"表达式 {expression} 的计算结果是 {result}。"
 
     except Exception as e:

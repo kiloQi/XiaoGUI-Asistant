@@ -116,5 +116,7 @@ def web_search(query: str) -> str:
         """
     result =web_search_impl(query)
     return result
+
+
 print("正在启动 XiaoGui-Assistant MCP Server...")
 mcp.run()

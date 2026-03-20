@@ -1,8 +1,6 @@
 #聊天记录保存工具
-
 import os
 import datetime
-
 
 #定义导出文件夹的路径
 EXPORT_DIR=r"D:\XiaoGui-Assistant\backend\exports"
@@ -33,7 +31,7 @@ def save_messages_to_markdown(messages,file_name:str="chat_log")->str:
             for message in messages:
                 role="未知"
                 avatar = "🤖"
-                if hasattr(message,"type"):#检查一下 message 这个对象有没有 type 这个属性。
+                if hasattr(message,"type"):        #检查一下 message 这个对象有没有 type 这个属性。
                     if message.type=="human":
                         role="用户"
                         avatar="👤"

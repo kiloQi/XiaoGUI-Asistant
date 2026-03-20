@@ -15,6 +15,7 @@ XiaoGui-Assistant/        <-- 项目总文件夹（根目录）
 ├── frontend/             <-- 前端代码区（Streamlit）
 │   └── web.py            <-- 网页界面代码（聊天窗口）
 │
+├── mcp_server.py              <-- Fastmcp服务器
 ├── venv/                 <-- 虚拟环境文件夹
 ├── .gitignore            <-- Git 忽略文件
 ├── requirements.txt      <-- 依赖清单

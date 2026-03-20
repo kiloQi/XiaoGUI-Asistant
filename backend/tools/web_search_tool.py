@@ -8,11 +8,10 @@ def web_search(query: str) -> str:
         import os
 
         api_key = os.getenv("TAVILY_API_KEY")
-
         if not api_key:
             return "⚠️ 错误：未找到 TAVILY_API_KEY 环境变量，请配置后重试。"
 
-        tavily_client = TavilyClient(api_key=api_key)
+        tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
         response = tavily_client.search(
             query=query,
@@ -51,7 +50,7 @@ def web_search(query: str) -> str:
         # 拼接所有行
         final_text = "\n".join(lines)
 
-        # 【终极保险】如果总长度超过 2000 字，强制截断
+        #如果总长度超过 2000 字，强制截断
         if len(final_text) > 2000:
             final_text = final_text[:2000] + "\n\n*(内容过长，已自动截断)*"
 

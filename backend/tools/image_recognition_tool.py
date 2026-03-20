@@ -104,15 +104,4 @@ def analyze_image(image_path: str) -> Optional[str]:
         error_msg = str(e)
         logger.error(f"❌ API 调用失败：{error_msg}")
 
-        # 统一返回格式，确保主程序能识别为失败
-        if "SSLEOFError" in error_msg or "EOF" in error_msg or "Connection" in error_msg:
-            return "错误：网络连接失败 (可能是模型名称错误或网络不通)"
-        elif "401" in error_msg or "Unauthorized" in error_msg:
-            return "错误：API Key 无效或权限不足"
-        elif "404" in error_msg:
-            return "错误：模型不存在 (请检查 .env 中的模型名称)"
-        elif "Rate limit" in error_msg or "429" in error_msg:
-            return "错误：请求过于频繁，请稍后再试"
-        else:
-            return f"错误：API 调用异常 - {error_msg}"
 

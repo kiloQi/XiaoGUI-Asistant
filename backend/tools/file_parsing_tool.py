@@ -42,8 +42,7 @@ def parse_file(file_path: str) -> List[str]:
             loader = Docx2txtLoader(file_path)
 
         elif ext in [".jpg", ".jpeg", ".png", ".bmp"]:
-            # 【临时方案】图片暂不解析，返回空列表，避免报错
-            # 如果需要 OCR，需安装 pytesseract 并在此处添加逻辑
+
             logger.warning(f"⚠️ 图片文件暂不支持 OCR 解析：{file_path}")
             return []
 

@@ -43,7 +43,7 @@ async def lifespan(app:FastAPI):
 
         client = MultiServerMCPClient({
             "XiaoGuiTools": {
-                "command": sys.executable,
+                "command": sys.executable,    #确保正确加载
                 "args": [mcp_script_path],
                 "transport": "stdio"
             }
@@ -53,19 +53,15 @@ async def lifespan(app:FastAPI):
         logger.info(f"✅ MCP 连接成功！获取到 {len(mcp_tools)} 个工具: {[t.name for t in mcp_tools]}")
     except Exception as e:
         logger.error(f"❌ MCP 连接失败: {e}")
-        logger.warning("⚠️ 将以无工具模式运行")
+        logger.warning(" 将以无工具模式运行")
 
-    if 'sqlite3' in sys.modules:
-        logger.info("  sqlite3 已加载")
-    else:
-        logger.info("✅ sqlite3 未加载")
 
     logger.info(" 初始化 LangGraph...")
     try:
         from langgraph.checkpoint.memory import MemorySaver
-        saver = MemorySaver()
+        memory = MemorySaver()
         graph_builder = await build_workflow(tools=mcp_tools)     #“异步启动”：用了 async/await，体现高性能。
-        workflow_app = graph_builder.compile(checkpointer=saver)
+        workflow_app = graph_builder.compile(checkpointer=memory)
         logger.info("✅ 服务启动成功 (支持流式输出)")
         yield
     except Exception as e:
@@ -74,7 +70,7 @@ async def lifespan(app:FastAPI):
 
 
 app = FastAPI(title="XiaoGui Assistant", version="1.0", lifespan=lifespan)
-#CORS 中间件，“允许任何来源访问我”，防止前端调不通后端。
+#CORS 中间件，“允许任何来源访问我 ”，防止前端调不通后端。
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"],
                    allow_headers=["*"])
 
